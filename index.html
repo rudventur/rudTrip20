@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>RudVentur – Feeling Lucky</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg: #0f1115; --card: #1a1d24; --accent: #ff6b35; --accent2: #00d4ff;
+      --text: #e8eaed; --muted: #9aa0a6; --border: #2d323c;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text); min-height: 100vh;
+      padding: 16px 12px 50px; line-height: 1.4;
+    }
+    .container { max-width: 860px; margin: 0 auto; }
+    header { text-align: center; margin-bottom: 18px; }
+    h1 { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.5px; }
+    .subtitle { color: var(--muted); font-size: 0.88rem; margin-top: 3px; }
+    /* Lucky buttons */
+    .lucky-row {
+      display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px;
+    }
+    @media (max-width: 480px) {
+      .lucky-row { grid-template-columns: 1fr 1fr; }
+    }
+    .lucky-btn {
+      padding: 14px 8px; border-radius: 10px;
+      background: var(--card); color: var(--text); font-weight: 700; font-size: 0.92rem;
+      cursor: pointer; border: 1px solid var(--border); transition: 0.15s;
+    }
+    .lucky-btn:hover { border-color: var(--accent); }
+    .lucky-btn.active { background: var(--accent); color: #111; border-color: var(--accent); }
+    /* Secondary filters */
+    .secondary {
+      display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;
+    }
+    .sec-btn {
+      padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--card); color: var(--muted); font-size: 0.8rem; font-weight: 600; cursor: pointer;
+    }
+    .sec-btn.active { background: var(--accent2); color: #111; border-color: var(--accent2); }
+    .field { margin-bottom: 12px; }
+    label { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    input[type="text"], input[type="date"] {
+      flex: 1; min-width: 140px; padding: 10px 12px; border-radius: 8px;
+      border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.92rem;
+    }
+    input:focus { outline: none; border-color: var(--accent2); }
+    .gps-btn, .map-pick-btn {
+      padding: 10px 14px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--card); color: var(--text); font-weight: 600; font-size: 0.85rem; cursor: pointer;
+    }
+    .gps-btn:hover, .map-pick-btn:hover { border-color: var(--accent2); }
+    .ticks {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px;
+      margin: 10px 0 12px; font-size: 0.84rem;
+    }
+    .ticks label { display: flex; align-items: center; gap: 6px; cursor: pointer; text-transform: none; letter-spacing: 0; color: var(--text); }
+    .ticks input { width: 14px; height: 14px; accent-color: var(--accent); }
+    /* Map + resize */
+    .map-wrap {
+      position: relative; margin-bottom: 6px;
+      border: 1px solid var(--border); border-radius: 11px; overflow: hidden;
+    }
+    #mainMap { height: 260px; width: 100%; background: #1a1d24; }
+    .resize-handle {
+      position: absolute; right: 0; top: 0; bottom: 0; width: 10px;
+      background: linear-gradient(90deg, transparent, rgba(255,107,53,0.35));
+      cursor: ew-resize; z-index: 1000;
+    }
+    .map-hint { color: var(--muted); font-size: 0.76rem; margin-bottom: 14px; }
+    #go {
+      width: 100%; padding: 14px; border: none; border-radius: 10px;
+      background: var(--accent); color: #111; font-weight: 800; font-size: 1.05rem; cursor: pointer;
+      margin-top: 6px;
+    }
+    #go:hover { filter: brightness(1.07); }
+    #go:disabled { opacity: 0.65; cursor: wait; filter: none; }
+    #searchStatus {
+      color: var(--accent2); font-size: 0.8rem; margin-top: 8px; margin-bottom: 0;
+      min-height: 1.2em;
+    }
+    /* Result */
+    #result { display: none; margin-top: 24px; }
+    #result.visible { display: block; animation: fade 0.3s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .target-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+      padding: 16px 18px; margin-bottom: 14px;
+    }
+    .target-label { font-size: 0.68rem; text-transform: uppercase; letter-spacing: 1px; color: var(--accent2); margin-bottom: 3px; }
+    .target-name { font-size: 1.25rem; font-weight: 700; margin-bottom: 4px; }
+    .target-desc { color: var(--muted); font-size: 0.88rem; margin-bottom: 6px; }
+    .countdown {
+      margin-top: 10px; padding: 10px 12px; border-radius: 8px;
+      background: #2a1f18; border: 1px solid #5c3a22; color: #ffb380;
+      font-weight: 700; font-size: 0.95rem;
+    }
+    .target-contact { font-size: 0.85rem; margin-top: 6px; }
+    .target-contact a { color: var(--accent2); text-decoration: none; }
+    .target-gps { font-size: 0.85rem; color: var(--muted); margin-top: 6px; }
+    .target-gps a { color: var(--accent2); text-decoration: none; }
+    .target-photo { margin-top: 10px; }
+    .target-photo img { max-width: 100%; border-radius: 10px; display: block; }
+    .target-photo .photo-placeholder { color: var(--muted); font-size: 0.82rem; font-style: italic; }
+    .mode-tag {
+      display: inline-block; margin-top: 8px; padding: 2px 8px; border-radius: 999px;
+      font-size: 0.68rem; font-weight: 600; background: #2a2f3a; color: var(--accent2);
+    }
+    #resultMap {
+      height: 220px; border-radius: 11px; border: 1px solid var(--border); margin-bottom: 16px;
+      background: #1a1d24;
+    }
+    .routes-title { font-size: 0.9rem; font-weight: 700; color: var(--muted); margin-bottom: 9px; }
+    .route {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 12px 14px; margin-bottom: 10px;
+    }
+    .route-header { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
+    .route-num {
+      width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
+      color: #111; font-weight: 800; font-size: 0.78rem;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .route-title { font-weight: 700; font-size: 0.9rem; }
+    .stages { list-style: none; }
+    .stages li { position: relative; padding-left: 15px; margin-bottom: 5px; font-size: 0.87rem; }
+    .stages li::before { content: "→"; position: absolute; left: 0; color: var(--accent2); font-weight: 700; }
+    footer { text-align: center; margin-top: 30px; color: var(--muted); font-size: 0.72rem; }
+    /* Live weather ticker */
+    #weatherTicker {
+      background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+      padding: 10px 14px; margin-bottom: 16px;
+    }
+    #weatherTicker summary {
+      cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text);
+      list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+    #weatherTicker summary::-webkit-details-marker { display: none; }
+    #weatherTicker summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
+    #weatherStatus { color: var(--muted); font-size: 0.78rem; padding: 8px 0 2px; }
+    .wt-item { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
+    .wt-item img { width: 56px; height: 42px; object-fit: cover; border-radius: 6px; background: var(--bg); flex-shrink: 0; }
+    .wt-item .wt-body { min-width: 0; }
+    .wt-item h4 { font-size: 0.82rem; font-weight: 700; margin-bottom: 2px; line-height: 1.3; }
+    .wt-item h4 a { color: var(--text); text-decoration: none; }
+    .wt-item h4 a:hover { color: var(--accent2); }
+    .wt-item p { font-size: 0.72rem; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+    .wt-item .wt-meta { font-size: 0.65rem; color: var(--muted); opacity: 0.75; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>RudVentur – Feeling Lucky</h1>
+      <p class="subtitle">Lucky Place • Lucky Event • Good Trip — real random search, no suggestions</p>
+    </header>
+
+    <!-- Live weather ticker -->
+    <details id="weatherTicker">
+      <summary>🌦️ Live Weather News <span class="wt-toggle">tap to expand</span></summary>
+      <div id="weatherStatus">Loading live feed…</div>
+      <div id="weatherItems"></div>
+    </details>
+
+    <!-- Main Lucky modes -->
+    <div class="lucky-row">
+      <button class="lucky-btn active" data-lucky="place">Lucky Place</button>
+      <button class="lucky-btn" data-lucky="event">Lucky Event</button>
+      <button class="lucky-btn" data-lucky="both">Good Trip</button>
+      <button class="lucky-btn" data-lucky="news">📰 News</button>
+    </div>
+
+    <!-- Secondary filters -->
+    <div class="secondary">
+      <button class="sec-btn active" data-sec="present">Present</button>
+      <button class="sec-btn" data-sec="past">Past</button>
+      <button class="sec-btn" data-sec="future">Future</button>
+    </div>
+
+    <!-- Start -->
+    <div class="field">
+      <label>Start point</label>
+      <div class="row">
+        <input type="text" id="start" placeholder="Type a place or use GPS / map / random" />
+        <button class="gps-btn" id="gpsBtn">Use my GPS</button>
+        <button class="map-pick-btn" id="mapPickBtn">Pick on map</button>
+        <button class="map-pick-btn" id="startRandomBtn">🎲 Random</button>
+      </div>
+    </div>
+
+    <!-- Target keywords -->
+    <div class="field">
+      <label>Target search keywords (optional)</label>
+      <div class="row">
+        <input type="text" id="targetKeywords" placeholder="e.g. castle, waterfall, lighthouse — leave blank for fully random" />
+        <button class="map-pick-btn" id="keywordRandomBtn">🎲 Random</button>
+      </div>
+    </div>
+
+    <!-- Time window -->
+    <div class="field">
+      <label>Time window</label>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
+          <input type="checkbox" id="nowCheck" checked> Now
+        </label>
+        <input type="date" id="datePick" disabled placeholder="From" />
+        <span style="color:var(--muted);font-size:0.82rem;">to</span>
+        <input type="date" id="datePickEnd" disabled placeholder="To" />
+      </div>
+    </div>
+
+    <!-- Trip type -->
+    <div class="field">
+      <label>Trip type</label>
+      <div class="row">
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
+          <input type="radio" name="tripType" id="tripReturn" checked> Return trip
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
+          <input type="radio" name="tripType" id="tripOneWay"> One-way
+        </label>
+      </div>
+    </div>
+
+    <!-- Options -->
+    <div class="ticks">
+      <label><input type="checkbox" id="useEstimate" checked> Use time estimation (recommended)</label>
+      <label><input type="checkbox" id="allowWalk" checked> Walking stages ok</label>
+      <label><input type="checkbox" id="allowBike" checked> Bike ok</label>
+      <label><input type="checkbox" id="allowCar" checked> Car ok</label>
+      <label><input type="checkbox" id="preferPublic"> Prefer public transport</label>
+      <label><input type="checkbox" id="allowWeird"> Weird vehicles (higher rudness)</label>
+    </div>
+
+    <!-- Map -->
+    <div class="field">
+      <label>Search region (drag right edge to resize)</label>
+      <div class="map-wrap" id="mapWrap">
+        <div id="mainMap"></div>
+        <div class="resize-handle" id="resizeHandle"></div>
+      </div>
+      <p class="map-hint">This is the real search area — pan/zoom the map (or use GPS / pick a point) before hitting Lucky. No curated list, ever: every target comes from a live OpenStreetMap search inside whatever the map is showing, or — if nothing local turns up — a real live headline from a free news site, placed on the map with a funny route to reach it.</p>
+    </div>
+
+    <button id="go">I’m Feeling Lucky</button>
+    <p class="map-hint" id="searchStatus"></p>
+
+    <!-- Result -->
+    <div id="result">
+      <div class="target-card">
+        <div class="target-label">Your Lucky Target</div>
+        <div class="target-name" id="targetName"></div>
+        <div class="target-desc" id="targetDesc"></div>
+        <div class="target-gps" id="targetGps"></div>
+        <div class="target-photo" id="targetPhoto"></div>
+        <div class="countdown" id="countdown" style="display:none;"></div>
+        <div class="target-contact" id="targetContact"></div>
+        <div class="mode-tag" id="modeTag"></div>
+      </div>
+      <div id="resultMap"></div>
+      <div class="routes-title" id="routesTitle">Possible (funny) routes</div>
+      <div id="routes"></div>
+    </div>
+
+    <footer>RudVentur Feeling Lucky • Live random search via OpenStreetMap (Overpass API), with a live free-news fallback (GDELT) • Routes are deliberately funny; timing is still an estimate</footer>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="search-engine.js"></script>
+  <script>
+    // ---- Live weather ticker (independent of the Lucky search engine) ----
+    // Renders RudVentur's "Weather News" RSS.app feed — real, live headlines,
+    // not curated — matching the site's "no fake data" philosophy. CORS is
+    // open on this feed, so a plain client-side fetch + DOMParser works.
+    (function () {
+      const WEATHER_FEED_URL = "https://rss.app/feeds/tRcMwW2Kz8Jl5nNn.xml";
+
+      function stripHtml(html) {
+        const doc = new DOMParser().parseFromString(html, "text/html");
+        return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+      }
+      function safeUrl(raw) {
+        try {
+          const u = new URL(raw, location.href);
+          return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
+        } catch {
+          return "";
+        }
+      }
+      function timeAgo(dateStr) {
+        const d = new Date(dateStr);
+        if (isNaN(d)) return "";
+        const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+        if (mins < 60) return mins + "m ago";
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return hrs + "h ago";
+        return Math.round(hrs / 24) + "d ago";
+      }
+      function tagText(item, tag) {
+        const el = item.getElementsByTagName(tag)[0];
+        return el ? (el.textContent || "").trim() : "";
+      }
+
+      async function loadWeatherTicker() {
+        const statusEl = document.getElementById("weatherStatus");
+        const itemsEl = document.getElementById("weatherItems");
+        if (!statusEl || !itemsEl) return;
+        statusEl.style.display = "block";
+        statusEl.textContent = "Loading live feed…";
+        try {
+          const res = await fetch(WEATHER_FEED_URL, { cache: "no-store" });
+          if (!res.ok) throw new Error("HTTP " + res.status);
+          const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
+          if (xml.querySelector("parsererror")) throw new Error("feed parse error");
+
+          const items = [...xml.getElementsByTagName("item")].slice(0, 6).map(item => {
+            const media = item.getElementsByTagName("media:content")[0];
+            return {
+              title: tagText(item, "title"),
+              link: safeUrl(tagText(item, "link")),
+              creator: tagText(item, "dc:creator"),
+              pubDate: tagText(item, "pubDate"),
+              snippet: stripHtml(tagText(item, "description")),
+              image: media ? safeUrl(media.getAttribute("url") || "") : ""
+            };
+          });
+
+          if (!items.length) {
+            statusEl.textContent = "No stories in the feed right now.";
+            return;
+          }
+          statusEl.style.display = "none";
+          itemsEl.innerHTML = "";
+          items.forEach(it => {
+            const row = document.createElement("div");
+            row.className = "wt-item";
+            if (it.image) {
+              const img = document.createElement("img");
+              img.src = it.image;
+              img.alt = "";
+              img.loading = "lazy";
+              img.addEventListener("error", () => img.remove());
+              row.appendChild(img);
+            }
+            const body = document.createElement("div");
+            body.className = "wt-body";
+            const h4 = document.createElement("h4");
+            if (it.link) {
+              const a = document.createElement("a");
+              a.href = it.link;
+              a.target = "_blank";
+              a.rel = "noopener";
+              a.textContent = it.title || "(untitled)";
+              h4.appendChild(a);
+            } else {
+              h4.textContent = it.title || "(untitled)";
+            }
+            const p = document.createElement("p");
+            p.textContent = it.snippet;
+            const meta = document.createElement("div");
+            meta.className = "wt-meta";
+            meta.textContent = [it.creator, timeAgo(it.pubDate)].filter(Boolean).join(" • ");
+            body.appendChild(h4);
+            body.appendChild(p);
+            body.appendChild(meta);
+            row.appendChild(body);
+            itemsEl.appendChild(row);
+          });
+        } catch (err) {
+          statusEl.style.display = "block";
+          statusEl.textContent = "Could not load the live feed (" + err.message + ").";
+        }
+      }
+
+      loadWeatherTicker();
+      setInterval(loadWeatherTicker, 5 * 60 * 1000);
+    })();
+  </script>
+  <script>
+    // ---- Startup guard: if a dependency is missing (wrong filename, blocked
+    // CDN, opened as file:// ...) fail LOUDLY on the button instead of
+    // silently doing nothing. ----
+    if (typeof L === "undefined" || typeof TripSearchEngine === "undefined") {
+      const goBtn = document.getElementById("go");
+      goBtn.disabled = true;
+      goBtn.textContent = typeof TripSearchEngine === "undefined"
+        ? "search-engine.js not loaded (check filename & folder)"
+        : "Map library blocked (check connection / ad-blocker)";
+      console.error("Startup failed — L:", typeof L, "| TripSearchEngine:", typeof TripSearchEngine);
+      throw new Error("Missing dependency — see the button for details");
+    }
+
+    // The actual target search (OSM Overpass + live-news fallback, category
+    // tags, photo/GPS normalization) lives in search-engine.js as
+    // window.TripSearchEngine — this script is just the UI: map/state, form
+    // handling, and rendering whatever it hands back.
+    const { pick, KEYWORD_IDEAS } = TripSearchEngine;
+
+    // ========== STATE ==========
+    let luckyMode = "place";
+    let secFilter = "present";
+    let mainMap, resultMap;
+    let startLatLon = null;
+    let pickingOnMap = false;
+    let mapInteracted = false;
+
+    // Init map
+    mainMap = L.map("mainMap").setView([20, 0], 2);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      attribution: "© OpenStreetMap", maxZoom: 18
+    }).addTo(mainMap);
+    mainMap.on("moveend zoomend", () => { mapInteracted = true; });
+
+    // Resize handle (sideways) — this genuinely changes how much geographic
+    // area is visible, and therefore how much area gets searched.
+    const wrap = document.getElementById("mapWrap");
+    const handle = document.getElementById("resizeHandle");
+    let resizing = false;
+    handle.addEventListener("mousedown", e => {
+      resizing = true;
+      e.preventDefault();
+    });
+    window.addEventListener("mousemove", e => {
+      if (!resizing) return;
+      const rect = wrap.getBoundingClientRect();
+      let newW = e.clientX - rect.left;
+      newW = Math.max(280, Math.min(newW, window.innerWidth - 40));
+      wrap.style.width = newW + "px";
+      mainMap.invalidateSize();
+    });
+    window.addEventListener("mouseup", () => { resizing = false; });
+
+    // Lucky mode buttons
+    document.querySelectorAll(".lucky-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".lucky-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        luckyMode = btn.dataset.lucky;
+      });
+    });
+
+    // Secondary filters
+    document.querySelectorAll(".sec-btn").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".sec-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        secFilter = btn.dataset.sec;
+      });
+    });
+
+    // Now checkbox — controls both ends of the time-span range
+    document.getElementById("nowCheck").addEventListener("change", e => {
+      document.getElementById("datePick").disabled = e.target.checked;
+      document.getElementById("datePickEnd").disabled = e.target.checked;
+    });
+
+    // Keyword "Random" — fills the field with an inspiration term, doesn't
+    // search anything itself. The actual search still runs on Feeling Lucky.
+    document.getElementById("keywordRandomBtn").addEventListener("click", () => {
+      document.getElementById("targetKeywords").value = pick(KEYWORD_IDEAS);
+    });
+
+    // Shared geolocation helper — used by the GPS button, and quietly by
+    // "Feeling Lucky" itself if the user hasn't set a start point or touched
+    // the map yet (so the search doesn't run against the default world view).
+    function doLocate({ silent = false } = {}) {
+      return new Promise(resolve => {
+        if (!navigator.geolocation) {
+          if (!silent) alert("Geolocation not available");
+          return resolve(false);
+        }
+        const timer = setTimeout(() => resolve(false), silent ? 6000 : 15000);
+        navigator.geolocation.getCurrentPosition(
+          pos => {
+            clearTimeout(timer);
+            startLatLon = { lat: pos.coords.latitude, lon: pos.coords.longitude };
+            document.getElementById("start").value = `GPS ${startLatLon.lat.toFixed(4)}, ${startLatLon.lon.toFixed(4)}`;
+            mainMap.setView([startLatLon.lat, startLatLon.lon], 13);
+            L.marker([startLatLon.lat, startLatLon.lon]).addTo(mainMap).bindPopup("You are here").openPopup();
+            resolve(true);
+          },
+          () => { clearTimeout(timer); if (!silent) alert("Could not get location"); resolve(false); },
+          { timeout: silent ? 5500 : 10000 }
+        );
+      });
+    }
+
+    // GPS
+    document.getElementById("gpsBtn").addEventListener("click", () => { doLocate({ silent: false }); });
+
+    // Pick on map
+    document.getElementById("mapPickBtn").addEventListener("click", () => {
+      pickingOnMap = true;
+      alert("Click on the map to set your start point");
+    });
+    mainMap.on("click", e => {
+      if (!pickingOnMap) return;
+      startLatLon = { lat: e.latlng.lat, lon: e.latlng.lng };
+      document.getElementById("start").value = `Map ${startLatLon.lat.toFixed(4)}, ${startLatLon.lon.toFixed(4)}`;
+      L.marker([startLatLon.lat, startLatLon.lon]).addTo(mainMap).bindPopup("Start").openPopup();
+      pickingOnMap = false;
+    });
+
+    // Random start point — a uniform random draw inside the current map view
+    // once you've panned/zoomed to an area, otherwise a uniform draw across
+    // the whole (non-polar) world.
+    document.getElementById("startRandomBtn").addEventListener("click", () => {
+      let lat, lon;
+      if (mapInteracted) {
+        const b = mainMap.getBounds();
+        lat = b.getSouth() + Math.random() * (b.getNorth() - b.getSouth());
+        lon = b.getWest() + Math.random() * (b.getEast() - b.getWest());
+      } else {
+        lat = -60 + Math.random() * 135;
+        lon = -180 + Math.random() * 360;
+        mainMap.setView([lat, lon], 6, { animate: false });
+        mapInteracted = true;
+      }
+      startLatLon = { lat, lon };
+      document.getElementById("start").value = `Random ${lat.toFixed(4)}, ${lon.toFixed(4)}`;
+      L.marker([lat, lon]).addTo(mainMap).bindPopup("Random start").openPopup();
+    });
+
+    // ========== HELPERS ==========
+    function setStatus(msg) {
+      document.getElementById("searchStatus").textContent = msg || "";
+    }
+
+    function getTimeWindow() {
+      if (document.getElementById("nowCheck").checked) return "now";
+      const from = document.getElementById("datePick").value;
+      const to = document.getElementById("datePickEnd").value;
+      if (from && to && to !== from) return `${from} → ${to}`;
+      return from || to || "now";
+    }
+
+    function estimateLeaveHours(target) {
+      // Still a rough demo estimate (labelled as such in the UI) — separate
+      // concern from target selection.
+      if (luckyMode !== "both") return null;
+      return 2 + Math.floor(Math.random() * 10); // 2–12 h for demo
+    }
+
+    function showPlainMessage(title, desc) {
+      document.getElementById("targetName").textContent = title;
+      document.getElementById("targetDesc").textContent = desc;
+      document.getElementById("targetGps").innerHTML = "";
+      document.getElementById("targetPhoto").innerHTML = "";
+      document.getElementById("countdown").style.display = "none";
+      document.getElementById("targetContact").innerHTML = "";
+      document.getElementById("modeTag").textContent = "";
+      document.getElementById("resultMap").innerHTML = "";
+      document.getElementById("routesTitle").style.display = "none";
+      document.getElementById("routes").innerHTML = "";
+      document.getElementById("result").classList.add("visible");
+      document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+    }
+
+    // ========== MAIN ==========
+    document.getElementById("go").addEventListener("click", async () => {
+      const goBtn = document.getElementById("go");
+      const startText = document.getElementById("start").value.trim();
+
+      // News mode doesn't depend on the visible map area at all, so it skips
+      // the start-point/GPS gate below — it's meant to be the fast, always-
+      // available option.
+      if (luckyMode !== "news" && !mapInteracted && !startLatLon) {
+        goBtn.disabled = true;
+        goBtn.textContent = "Locating…";
+        setStatus("Locating you (silent GPS fix)…");
+        const got = await doLocate({ silent: true });
+        goBtn.disabled = false;
+        goBtn.textContent = "I’m Feeling Lucky";
+        if (!got) {
+          setStatus("");
+          showPlainMessage(
+            "Pick a start point first",
+            "Use your GPS, pick a spot on the map, or pan/zoom the map to the area you want to search — then hit Feeling Lucky again."
+          );
+          return;
+        }
+      }
+
+      goBtn.disabled = true;
+      const originalLabel = goBtn.textContent;
+      goBtn.textContent = luckyMode === "news" ? "Fetching a real headline…" : "Searching real places…";
+      document.getElementById("result").classList.remove("visible");
+      setStatus("Starting live search…");
+
+      try {
+        const keyword = document.getElementById("targetKeywords").value.trim();
+
+        // News mode skips fetchRandomTarget (and Overpass) entirely — it's
+        // a direct, fast path straight to a live headline placed on the map.
+        // Both paths stream progress back through setStatus.
+        const found = luckyMode === "news"
+          ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { target: t, widened: false } : null)
+          : await TripSearchEngine.fetchRandomTarget(mainMap, luckyMode, secFilter, keyword, setStatus);
+
+        if (!found) {
+          setStatus("");
+          showPlainMessage(
+            "No luck this time",
+            luckyMode === "news"
+              ? "Couldn't get a live headline just now (the free news API may be busy). Try again in a few seconds."
+              : "No matching real places turned up nearby, and the live news fallback came up empty too. Try a different area, mode or filter."
+          );
+          return;
+        }
+
+        const target = found.target;
+        const isReturn = document.getElementById("tripReturn").checked;
+        const leaveHours = estimateLeaveHours(target);
+
+        document.getElementById("routesTitle").style.display = "block";
+        document.getElementById("targetName").textContent = target.name;
+        document.getElementById("targetDesc").textContent = target.desc +
+          (found.widened ? " — nothing local matched, so here's a real live news story instead" : "");
+
+        // GPS location — plain coordinates plus a live link to view it on OSM.
+        document.getElementById("targetGps").innerHTML =
+          `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
+          `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
+
+        // Closest available picture — from the OSM element's own tags if it
+        // has one, otherwise a one-off lookup of its Wikipedia thumbnail.
+        const photoEl = document.getElementById("targetPhoto");
+        if (target.photoUrl) {
+          photoEl.innerHTML = `<img src="${target.photoUrl}" alt="${target.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span class=&quot;photo-placeholder&quot;>No photo available</span>'">`;
+        } else if (target.wikipedia) {
+          photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
+          TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(url => {
+            photoEl.innerHTML = url
+              ? `<img src="${url}" alt="${target.name}" loading="lazy">`
+              : `<span class="photo-placeholder">No photo available</span>`;
+          });
+        } else {
+          photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
+        }
+
+        const cd = document.getElementById("countdown");
+        if (leaveHours !== null) {
+          cd.style.display = "block";
+          cd.textContent = `Last possible leave in ~${leaveHours} hours (estimation)`;
+        } else {
+          cd.style.display = "none";
+        }
+
+        document.getElementById("targetContact").innerHTML = target.link
+          ? `<a href="${target.link}" target="_blank" rel="noopener">More info →</a>`
+          : "No extra link";
+
+        document.getElementById("modeTag").textContent =
+          luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
+          (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() +
+          " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
+
+        // Start coords
+        let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
+        let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
+
+        // Result map
+        if (resultMap) resultMap.remove();
+        resultMap = L.map("resultMap").setView([(sLat + target.lat) / 2, (sLon + target.lon) / 2], 3);
+        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+          attribution: "© OpenStreetMap", maxZoom: 18
+        }).addTo(resultMap);
+        L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
+        L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
+        resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
+        L.polyline([[sLat, sLon], [target.lat, target.lon]], {
+          color: "#ff6b35", weight: 3, dashArray: "8,8"
+        }).addTo(resultMap);
+
+        // Routes — funny on purpose: silly transport, real distance underneath
+        const routesEl = document.getElementById("routes");
+        routesEl.innerHTML = "";
+        for (let i = 0; i < 2; i++) {
+          const stages = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn);
+          const div = document.createElement("div");
+          div.className = "route";
+          div.innerHTML = `
+            <div class="route-header">
+              <div class="route-num">${i + 1}</div>
+              <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
+            </div>
+            <ul class="stages">${stages.map(s => `<li>${s}</li>`).join("")}</ul>
+          `;
+          routesEl.appendChild(div);
+        }
+
+        document.getElementById("result").classList.add("visible");
+        document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+      } catch (err) {
+        console.error(err);
+        setStatus("");
+        const raw = err && err.message ? err.message : String(err);
+        const looksLikeBlockedRequest = /failed to fetch|networkerror|load failed/i.test(raw);
+        const hint = looksLikeBlockedRequest
+          ? " This usually means one of: no internet connection right now, a browser extension (ad-blocker / privacy shield) blocking the request, or the page was opened as a local file instead of served over http/https (some browsers restrict that). Try pausing any ad-blocker, or test it once it's live on GitHub Pages."
+          : "";
+        showPlainMessage(
+          "Search failed",
+          `Couldn't reach the live data sources after trying everything available.${hint} (${raw})`
+        );
+      } finally {
+        goBtn.disabled = false;
+        goBtn.textContent = originalLabel;
+      }
+    });
+  </script>
+</body>
+</html>
