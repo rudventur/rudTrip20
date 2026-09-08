@@ -284,6 +284,169 @@ let lastOverpassCall = 0;
     }
   }
 
+  // ---------- Generic RSS / Atom / XML feed converter ----------
+  // Turns ANY feed URL into the same normalized item shape, so it can feed
+  // a plain JSON list, become a Lucky-style map target, or both — one
+  // parser, several consumers. Most feeds don't send CORS headers (unlike
+  // GDELT), so a direct fetch is tried first and, only on failure, retried
+  // through free public CORS proxies — same "never just fail silently"
+  // spirit as the rest of the engine.
+  const FEED_TIMEOUT_MS = 10000;
+  const FEED_PROXIES = [
+    url => url,
+    url => `https://corsproxy.io/?url=${encodeURIComponent(url)}`,
+    url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`
+  ];
+
+  async function fetchFeedText(url) {
+    const errors = [];
+    for (const buildUrl of FEED_PROXIES) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FEED_TIMEOUT_MS);
+      try {
+        const res = await fetch(buildUrl(url), { signal: controller.signal, cache: "no-store" });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const text = await res.text();
+        if (!text || !text.trim()) throw new Error("empty response");
+        return text;
+      } catch (err) {
+        errors.push(err && err.message ? err.message : String(err));
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    throw new Error(`Could not fetch feed (tried direct + proxies): ${errors.join(" | ")}`);
+  }
+
+  function feedTagText(el, ...tagNames) {
+    for (const tag of tagNames) {
+      const found = el.getElementsByTagName(tag)[0];
+      if (found && found.textContent && found.textContent.trim()) return found.textContent.trim();
+    }
+    return "";
+  }
+
+  function stripHtmlToText(html) {
+    if (!html) return "";
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
+  }
+
+  function safeHttpUrl(raw) {
+    if (!raw) return null;
+    try {
+      const u = new URL(raw, "https://example.invalid/");
+      return (u.protocol === "http:" || u.protocol === "https:") ? u.href : null;
+    } catch {
+      return null;
+    }
+  }
+
+  function firstImageFromEntry(entry) {
+    const media = entry.getElementsByTagName("media:content")[0] || entry.getElementsByTagName("media:thumbnail")[0];
+    if (media) {
+      const u = safeHttpUrl(media.getAttribute("url"));
+      if (u) return u;
+    }
+    const enclosure = entry.getElementsByTagName("enclosure")[0];
+    if (enclosure && /^image\//i.test(enclosure.getAttribute("type") || "")) {
+      const u = safeHttpUrl(enclosure.getAttribute("url"));
+      if (u) return u;
+    }
+    const rawDesc = feedTagText(entry, "content:encoded", "description", "summary", "content");
+    const m = rawDesc && rawDesc.match(/<img[^>]+src=["']([^"']+)["']/i);
+    return m ? safeHttpUrl(m[1]) : null;
+  }
+
+  function entryLink(entry, isAtom) {
+    if (!isAtom) return safeHttpUrl(feedTagText(entry, "link"));
+    const linkEls = [...entry.getElementsByTagName("link")];
+    const alt = linkEls.find(l => !l.getAttribute("rel") || l.getAttribute("rel") === "alternate");
+    return safeHttpUrl((alt || linkEls[0])?.getAttribute("href"));
+  }
+
+  function normalizeFeedEntry(entry, isAtom) {
+    const link = entryLink(entry, isAtom);
+    const rawDesc = feedTagText(entry, "content:encoded", "description", "summary", "content");
+    return {
+      title: feedTagText(entry, "title") || "(untitled)",
+      link,
+      description: stripHtmlToText(rawDesc),
+      pubDate: feedTagText(entry, "pubDate", "published", "updated", "dc:date") || null,
+      image: firstImageFromEntry(entry),
+      guid: feedTagText(entry, "guid", "id") || link
+    };
+  }
+
+  // Fetches + parses any RSS 2.0, RSS 1.0/RDF, or Atom feed into a plain,
+  // normalized JSON shape: { feedTitle, feedLink, items: [...] }.
+  async function fetchFeedItems(feedUrl, limit = 30) {
+    const xmlText = await fetchFeedText(feedUrl);
+    const xml = new DOMParser().parseFromString(xmlText, "text/xml");
+    if (xml.querySelector("parsererror")) throw new Error("That URL didn't parse as RSS/XML");
+
+    const rootTag = xml.documentElement ? xml.documentElement.tagName.toLowerCase() : "";
+    const isAtom = rootTag === "feed";
+    const entries = [...xml.getElementsByTagName(isAtom ? "entry" : "item")].slice(0, limit);
+    if (!entries.length) throw new Error("Feed parsed OK but had no items/entries");
+
+    const channel = xml.getElementsByTagName("channel")[0] || xml.getElementsByTagName("feed")[0];
+    return {
+      feedTitle: (channel && feedTagText(channel, "title")) || feedUrl,
+      feedLink: (channel && safeHttpUrl(feedTagText(channel, "link"))) || null,
+      items: entries.map(e => normalizeFeedEntry(e, isAtom))
+    };
+  }
+
+  // Converts one normalized feed item into the same target shape the map
+  // renderer already understands (see describeOsmElement / fetchNewsTarget).
+  // Feeds carry no coordinates, so location is guessed from a country name
+  // mentioned in the title/description; if none is found the pin still
+  // renders (spread randomly) rather than silently dropping the item.
+  function guessCountryFromText(text) {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    for (const name of Object.keys(COUNTRY_CENTROIDS)) {
+      if (lower.includes(name)) return name;
+    }
+    return null;
+  }
+
+  function feedItemToTarget(item, feedTitle) {
+    const country = guessCountryFromText(`${item.title} ${item.description}`);
+    const centroid = country ? COUNTRY_CENTROIDS[country] : null;
+    const lat = centroid
+      ? Math.max(-85, Math.min(85, centroid[0] + (Math.random() - 0.5) * 4))
+      : (Math.random() * 170) - 85;
+    const lon = centroid
+      ? centroid[1] + (Math.random() - 0.5) * 4
+      : (Math.random() * 360) - 180;
+
+    return {
+      name: item.title,
+      loc: country ? item.title : "Location unknown — approximate pin",
+      lat, lon,
+      desc: `From feed · ${feedTitle || "RSS/XML"}`,
+      link: item.link,
+      photoUrl: item.image,
+      source: "rss"
+    };
+  }
+
+  // Convenience wrapper matching fetchNewsTarget's signature: fetch a feed
+  // and hand back one random (optionally keyword-filtered) item as a target.
+  async function fetchFeedTarget(feedUrl, keyword, onStatus) {
+    const say = m => { if (onStatus) onStatus(m); };
+    say("Fetching feed…");
+    const { feedTitle, items } = await fetchFeedItems(feedUrl);
+    const pool = keyword
+      ? items.filter(it => `${it.title} ${it.description}`.toLowerCase().includes(keyword.toLowerCase()))
+      : items;
+    const candidates = pool.length ? pool : items;
+    if (!candidates.length) return null;
+    return feedItemToTarget(pick(candidates), feedTitle);
+  }
+
   // ---------- Main ----------
   async function fetchRandomTarget(map, mode, sec, keyword, onStatus) {
     const say = m => { if (onStatus) onStatus(m); };
@@ -406,6 +569,9 @@ let lastOverpassCall = 0;
   global.TripSearchEngine = {
     fetchRandomTarget,
     fetchNewsTarget,
+    fetchFeedItems,
+    fetchFeedTarget,
+    feedItemToTarget,
     fetchWikipediaThumbnail,
     buildFunnyRoute,
     haversineKm,

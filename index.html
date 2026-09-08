@@ -152,6 +152,23 @@
     .wt-item h4 a:hover { color: var(--accent2); }
     .wt-item p { font-size: 0.72rem; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .wt-item .wt-meta { font-size: 0.65rem; color: var(--muted); opacity: 0.75; margin-top: 2px; }
+    /* Feed → Trip converter (reuses the wt-item look for parsed entries) */
+    #feedConverter { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
+    #feedConverter summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #feedConverter summary::-webkit-details-marker { display: none; }
+    #feedConverter summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
+    .feed-row { display: flex; gap: 8px; margin: 10px 0 4px; flex-wrap: wrap; }
+    .feed-row input[type="text"] { flex: 1; min-width: 160px; padding: 9px 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.86rem; }
+    .feed-row input[type="text"]:focus { outline: none; border-color: var(--accent2); }
+    .feed-btn { padding: 9px 14px; border-radius: 8px; border: 1px solid var(--border); background: var(--accent2); color: #111; font-weight: 700; font-size: 0.85rem; cursor: pointer; }
+    .feed-btn:disabled { opacity: 0.6; cursor: wait; }
+    .feed-hint { color: var(--muted); font-size: 0.74rem; margin: 2px 0 4px; }
+    #feedStatus { color: var(--muted); font-size: 0.78rem; padding: 4px 0; min-height: 1.1em; }
+    .feed-item { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--border); }
+    .feed-item img { width: 56px; height: 42px; object-fit: cover; border-radius: 6px; background: var(--bg); flex-shrink: 0; }
+    .feed-item .wt-body { min-width: 0; flex: 1; }
+    .feed-use-btn { margin-top: 5px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--accent2); font-size: 0.72rem; font-weight: 700; cursor: pointer; }
+    .feed-use-btn:hover { border-color: var(--accent2); }
   </style>
 </head>
 <body>
@@ -166,6 +183,19 @@
       <summary>🌦️ Live Weather News <span class="wt-toggle">tap to expand</span></summary>
       <div id="weatherStatus">Loading live feed…</div>
       <div id="weatherItems"></div>
+    </details>
+
+    <!-- RSS/XML → Trip converter: paste any feed, get real JSON items back,
+         and optionally drop any of them on the map as a Lucky target. -->
+    <details id="feedConverter">
+      <summary>🔁 Feed → Trip Converter <span class="wt-toggle">tap to expand</span></summary>
+      <p class="feed-hint">Paste any RSS, Atom or plain XML feed URL. It's parsed live in your browser — no curated data, same as the rest of RudVentur.</p>
+      <div class="feed-row">
+        <input type="text" id="feedUrl" placeholder="https://example.com/feed.xml" />
+        <button class="feed-btn" id="feedConvertBtn">Convert</button>
+      </div>
+      <p id="feedStatus"></p>
+      <div id="feedItems"></div>
     </details>
 
     <!-- Main Lucky modes -->
@@ -563,10 +593,95 @@
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
     }
 
+    // Renders any target (from OSM/news via fetchRandomTarget, or from the
+    // Feed → Trip converter below) onto the result card, map and routes —
+    // shared so a feed item is treated exactly like a Lucky search result.
+    function renderTarget(target, { widened = false, modeLabelOverride = null } = {}) {
+      const startText = document.getElementById("start").value.trim();
+      const isReturn = document.getElementById("tripReturn").checked;
+      const leaveHours = estimateLeaveHours(target);
+
+      document.getElementById("routesTitle").style.display = "block";
+      document.getElementById("targetName").textContent = target.name;
+      document.getElementById("targetDesc").textContent = target.desc +
+        (widened ? " — nothing local matched, so here's a real live news story instead" : "");
+
+      document.getElementById("targetGps").innerHTML =
+        `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
+        `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
+
+      const photoEl = document.getElementById("targetPhoto");
+      if (target.photoUrl) {
+        photoEl.innerHTML = `<img src="${target.photoUrl}" alt="${target.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span class=&quot;photo-placeholder&quot;>No photo available</span>'">`;
+      } else if (target.wikipedia) {
+        photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
+        TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(url => {
+          photoEl.innerHTML = url
+            ? `<img src="${url}" alt="${target.name}" loading="lazy">`
+            : `<span class="photo-placeholder">No photo available</span>`;
+        });
+      } else {
+        photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
+      }
+
+      const cd = document.getElementById("countdown");
+      if (leaveHours !== null) {
+        cd.style.display = "block";
+        cd.textContent = `Last possible leave in ~${leaveHours} hours (estimation)`;
+      } else {
+        cd.style.display = "none";
+      }
+
+      document.getElementById("targetContact").innerHTML = target.link
+        ? `<a href="${target.link}" target="_blank" rel="noopener">More info →</a>`
+        : "No extra link";
+
+      const sourceLabel = target.source === "news" ? "live news (GDELT)"
+        : target.source === "rss" ? "RSS/XML feed"
+        : target.source === "wikidata" ? "Wikidata"
+        : "OpenStreetMap";
+      document.getElementById("modeTag").textContent = modeLabelOverride ||
+        (luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
+        (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() + " • via " + sourceLabel);
+
+      let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
+      let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
+
+      if (resultMap) resultMap.remove();
+      resultMap = L.map("resultMap").setView([(sLat + target.lat) / 2, (sLon + target.lon) / 2], 3);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap", maxZoom: 18
+      }).addTo(resultMap);
+      L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
+      L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
+      resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
+      L.polyline([[sLat, sLon], [target.lat, target.lon]], {
+        color: "#ff6b35", weight: 3, dashArray: "8,8"
+      }).addTo(resultMap);
+
+      const routesEl = document.getElementById("routes");
+      routesEl.innerHTML = "";
+      for (let i = 0; i < 2; i++) {
+        const stages = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn);
+        const div = document.createElement("div");
+        div.className = "route";
+        div.innerHTML = `
+          <div class="route-header">
+            <div class="route-num">${i + 1}</div>
+            <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
+          </div>
+          <ul class="stages">${stages.map(s => `<li>${s}</li>`).join("")}</ul>
+        `;
+        routesEl.appendChild(div);
+      }
+
+      document.getElementById("result").classList.add("visible");
+      document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+    }
+
     // ========== MAIN ==========
     document.getElementById("go").addEventListener("click", async () => {
       const goBtn = document.getElementById("go");
-      const startText = document.getElementById("start").value.trim();
 
       // News mode doesn't depend on the visible map area at all, so it skips
       // the start-point/GPS gate below — it's meant to be the fast, always-
@@ -615,89 +730,7 @@
           return;
         }
 
-        const target = found.target;
-        const isReturn = document.getElementById("tripReturn").checked;
-        const leaveHours = estimateLeaveHours(target);
-
-        document.getElementById("routesTitle").style.display = "block";
-        document.getElementById("targetName").textContent = target.name;
-        document.getElementById("targetDesc").textContent = target.desc +
-          (found.widened ? " — nothing local matched, so here's a real live news story instead" : "");
-
-        // GPS location — plain coordinates plus a live link to view it on OSM.
-        document.getElementById("targetGps").innerHTML =
-          `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
-          `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
-
-        // Closest available picture — from the OSM element's own tags if it
-        // has one, otherwise a one-off lookup of its Wikipedia thumbnail.
-        const photoEl = document.getElementById("targetPhoto");
-        if (target.photoUrl) {
-          photoEl.innerHTML = `<img src="${target.photoUrl}" alt="${target.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span class=&quot;photo-placeholder&quot;>No photo available</span>'">`;
-        } else if (target.wikipedia) {
-          photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
-          TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(url => {
-            photoEl.innerHTML = url
-              ? `<img src="${url}" alt="${target.name}" loading="lazy">`
-              : `<span class="photo-placeholder">No photo available</span>`;
-          });
-        } else {
-          photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
-        }
-
-        const cd = document.getElementById("countdown");
-        if (leaveHours !== null) {
-          cd.style.display = "block";
-          cd.textContent = `Last possible leave in ~${leaveHours} hours (estimation)`;
-        } else {
-          cd.style.display = "none";
-        }
-
-        document.getElementById("targetContact").innerHTML = target.link
-          ? `<a href="${target.link}" target="_blank" rel="noopener">More info →</a>`
-          : "No extra link";
-
-        document.getElementById("modeTag").textContent =
-          luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
-          (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() +
-          " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
-
-        // Start coords
-        let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
-        let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
-
-        // Result map
-        if (resultMap) resultMap.remove();
-        resultMap = L.map("resultMap").setView([(sLat + target.lat) / 2, (sLon + target.lon) / 2], 3);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "© OpenStreetMap", maxZoom: 18
-        }).addTo(resultMap);
-        L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
-        L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
-        resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
-        L.polyline([[sLat, sLon], [target.lat, target.lon]], {
-          color: "#ff6b35", weight: 3, dashArray: "8,8"
-        }).addTo(resultMap);
-
-        // Routes — funny on purpose: silly transport, real distance underneath
-        const routesEl = document.getElementById("routes");
-        routesEl.innerHTML = "";
-        for (let i = 0; i < 2; i++) {
-          const stages = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn);
-          const div = document.createElement("div");
-          div.className = "route";
-          div.innerHTML = `
-            <div class="route-header">
-              <div class="route-num">${i + 1}</div>
-              <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
-            </div>
-            <ul class="stages">${stages.map(s => `<li>${s}</li>`).join("")}</ul>
-          `;
-          routesEl.appendChild(div);
-        }
-
-        document.getElementById("result").classList.add("visible");
-        document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+        renderTarget(found.target, { widened: found.widened });
       } catch (err) {
         console.error(err);
         setStatus("");
@@ -715,6 +748,103 @@
         goBtn.textContent = originalLabel;
       }
     });
+
+    // ========== FEED → TRIP CONVERTER ==========
+    // Paste any RSS/Atom/XML feed → real parsed JSON items, each of which
+    // can become a Lucky-style map target via the shared renderTarget().
+    (function () {
+      const urlInput = document.getElementById("feedUrl");
+      const convertBtn = document.getElementById("feedConvertBtn");
+      const statusEl = document.getElementById("feedStatus");
+      const itemsEl = document.getElementById("feedItems");
+      let lastFeedTitle = "";
+      let lastItems = [];
+
+      function timeAgo(dateStr) {
+        const d = new Date(dateStr);
+        if (isNaN(d)) return "";
+        const mins = Math.max(0, Math.round((Date.now() - d.getTime()) / 60000));
+        if (mins < 60) return mins + "m ago";
+        const hrs = Math.round(mins / 60);
+        if (hrs < 24) return hrs + "h ago";
+        return Math.round(hrs / 24) + "d ago";
+      }
+
+      function renderFeedItems(items) {
+        itemsEl.innerHTML = "";
+        items.forEach((it, idx) => {
+          const row = document.createElement("div");
+          row.className = "feed-item";
+          if (it.image) {
+            const img = document.createElement("img");
+            img.src = it.image;
+            img.alt = "";
+            img.loading = "lazy";
+            img.addEventListener("error", () => img.remove());
+            row.appendChild(img);
+          }
+          const body = document.createElement("div");
+          body.className = "wt-body";
+          const h4 = document.createElement("h4");
+          if (it.link) {
+            const a = document.createElement("a");
+            a.href = it.link;
+            a.target = "_blank";
+            a.rel = "noopener";
+            a.textContent = it.title;
+            h4.appendChild(a);
+          } else {
+            h4.textContent = it.title;
+          }
+          const p = document.createElement("p");
+          p.textContent = it.description;
+          const meta = document.createElement("div");
+          meta.className = "wt-meta";
+          meta.textContent = timeAgo(it.pubDate);
+          const useBtn = document.createElement("button");
+          useBtn.className = "feed-use-btn";
+          useBtn.type = "button";
+          useBtn.textContent = "📍 Use as Lucky target";
+          useBtn.addEventListener("click", () => {
+            const target = TripSearchEngine.feedItemToTarget(lastItems[idx], lastFeedTitle);
+            renderTarget(target, { modeLabelOverride: "FEED CONVERTER • via RSS/XML feed" });
+          });
+          body.appendChild(h4);
+          body.appendChild(p);
+          body.appendChild(meta);
+          body.appendChild(useBtn);
+          row.appendChild(body);
+          itemsEl.appendChild(row);
+        });
+      }
+
+      async function convertFeed() {
+        const url = urlInput.value.trim();
+        if (!url) {
+          statusEl.textContent = "Paste a feed URL first.";
+          return;
+        }
+        convertBtn.disabled = true;
+        itemsEl.innerHTML = "";
+        statusEl.textContent = "Fetching and parsing feed…";
+        try {
+          const { feedTitle, items } = await TripSearchEngine.fetchFeedItems(url);
+          lastFeedTitle = feedTitle;
+          lastItems = items;
+          statusEl.textContent = `${items.length} item${items.length === 1 ? "" : "s"} from “${feedTitle}”.`;
+          renderFeedItems(items);
+        } catch (err) {
+          lastItems = [];
+          itemsEl.innerHTML = "";
+          statusEl.textContent = "Couldn't convert that feed (" + (err && err.message ? err.message : err) + ").";
+        } finally {
+          convertBtn.disabled = false;
+        }
+      }
+
+      convertBtn.addEventListener("click", convertFeed);
+      urlInput.addEventListener("keydown", e => { if (e.key === "Enter") convertFeed(); });
+    })();
   </script>
 </body>
 </html>
