@@ -169,6 +169,14 @@
     .feed-item .wt-body { min-width: 0; flex: 1; }
     .feed-use-btn { margin-top: 5px; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--bg); color: var(--accent2); font-size: 0.72rem; font-weight: 700; cursor: pointer; }
     .feed-use-btn:hover { border-color: var(--accent2); }
+    /* Quick search */
+    #quickSearch { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; margin-bottom: 16px; }
+    #quickSearch summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #quickSearch summary::-webkit-details-marker { display: none; }
+    #quickSearch summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
+    .search-engines { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+    .se-btn { padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg); color: var(--text); font-size: 0.8rem; font-weight: 600; cursor: pointer; }
+    .se-btn:hover { border-color: var(--accent2); color: var(--accent2); }
   </style>
 </head>
 <body>
@@ -196,6 +204,23 @@
       </div>
       <p id="feedStatus"></p>
       <div id="feedItems"></div>
+    </details>
+
+    <!-- Quick search: no API, no fetch — just builds each engine's search
+         URL and opens it in a new tab. -->
+    <details id="quickSearch">
+      <summary>🔍 Quick Search <span class="wt-toggle">tap to expand</span></summary>
+      <p class="feed-hint">Type anything, pick an engine — opens in a new tab.</p>
+      <div class="feed-row">
+        <input type="text" id="quickSearchInput" placeholder="Search the web…" />
+      </div>
+      <div class="search-engines">
+        <button class="se-btn" data-engine="google">Google</button>
+        <button class="se-btn" data-engine="duckduckgo">DuckDuckGo</button>
+        <button class="se-btn" data-engine="bing">Bing</button>
+        <button class="se-btn" data-engine="wikipedia">Wikipedia</button>
+        <button class="se-btn" data-engine="maps">Google Maps</button>
+      </div>
     </details>
 
     <!-- Main Lucky modes -->
@@ -411,6 +436,35 @@
 
       loadWeatherTicker();
       setInterval(loadWeatherTicker, 5 * 60 * 1000);
+    })();
+  </script>
+  <script>
+    // ---- Quick search: no fetch, no API, no Leaflet/TripSearchEngine
+    // dependency — just builds each engine's own search URL and opens it in
+    // a new tab. Kept in its own script block (not gated behind the startup
+    // guard below) so it still works even if the map library is slow/blocked.
+    // noopener stops the opened page reaching back via window.opener
+    // (reverse tabnabbing).
+    (function () {
+      const ENGINES = {
+        google: q => `https://www.google.com/search?q=${encodeURIComponent(q)}`,
+        duckduckgo: q => `https://duckduckgo.com/?q=${encodeURIComponent(q)}`,
+        bing: q => `https://www.bing.com/search?q=${encodeURIComponent(q)}`,
+        wikipedia: q => `https://en.wikipedia.org/w/index.php?search=${encodeURIComponent(q)}`,
+        maps: q => `https://www.google.com/maps/search/${encodeURIComponent(q)}`
+      };
+      const input = document.getElementById("quickSearchInput");
+
+      function runSearch(engine) {
+        const q = input.value.trim();
+        if (!q) { input.focus(); return; }
+        window.open(ENGINES[engine](q), "_blank", "noopener");
+      }
+
+      document.querySelectorAll(".se-btn").forEach(btn => {
+        btn.addEventListener("click", () => runSearch(btn.dataset.engine));
+      });
+      input.addEventListener("keydown", e => { if (e.key === "Enter") runSearch("google"); });
     })();
   </script>
   <script>
