@@ -121,6 +121,9 @@
       background: var(--card); border: 1px solid var(--border); border-radius: 10px;
       padding: 12px 14px; margin-bottom: 10px;
     }
+    .route-meta { font-size: 0.76rem; color: var(--muted); margin-bottom: 8px; }
+    .reroll-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+    .reroll-row button { flex: 1; min-width: 140px; }
     .route-header { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
     .route-num {
       width: 22px; height: 22px; border-radius: 50%; background: var(--accent);
@@ -267,6 +270,11 @@
       <div id="resultMap"></div>
       <div class="routes-title" id="routesTitle">Possible (funny) routes</div>
       <div id="routes"></div>
+      <div class="reroll-row" id="rerollRow" style="display:none;">
+        <button class="map-pick-btn" id="rerollRoutesBtn">🔁 Re-roll routes</button>
+        <button class="map-pick-btn" id="rerollTargetBtn">🎯 Re-roll target</button>
+        <button class="map-pick-btn" id="shareBtn">🔗 Copy share link</button>
+      </div>
     </div>
 
     <footer>RudVentur Feeling Lucky • Live random search via OpenStreetMap (Overpass API), with a live free-news fallback (GDELT) • Routes are deliberately funny; timing is still an estimate</footer>
@@ -279,20 +287,53 @@
     // Renders RudVentur's "Weather News" RSS.app feed — real, live headlines,
     // not curated — matching the site's "no fake data" philosophy. CORS is
     // open on this feed, so a plain client-side fetch + DOMParser works.
+    // Shared with the main script below (classic inline scripts share one
+    // global scope) — sanitizes any externally-sourced URL (OSM tags, news
+    // articles, this feed) before it goes into an href/src.
+    function safeUrl(raw) {
+      try {
+        const u = new URL(raw, location.href);
+        return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
+      } catch {
+        return "";
+      }
+    }
+
+    // Today's weather-headline "mood" — a lightweight keyword read of the
+    // live feed below, reused by the route builder so the ticker actually
+    // influences the lucky result instead of sitting there independently.
+    let weatherMood = null;
+    function detectWeatherMood(items) {
+      const KEYWORDS = [
+        { mood: "rain", re: /\b(rain|storm|flood|downpour)\b/i },
+        { mood: "snow", re: /\b(snow|blizzard|ice storm|frost)\b/i },
+        { mood: "heat", re: /\b(heatwave|heat wave|drought|wildfire|scorching)\b/i },
+        { mood: "wind", re: /\b(hurricane|typhoon|cyclone|gale|windy)\b/i },
+        { mood: "fog", re: /\b(fog|smog|haze)\b/i }
+      ];
+      for (const it of items) {
+        const text = `${it.title} ${it.snippet}`;
+        for (const k of KEYWORDS) {
+          if (k.re.test(text)) return { mood: k.mood, text: it.title };
+        }
+      }
+      return null;
+    }
+    function weatherFlavorLine() {
+      if (!weatherMood) return null;
+      const advice = {
+        rain: "pack an umbrella", snow: "bring warm boots", heat: "grab sunscreen and water",
+        wind: "hold onto your hat", fog: "leave a little earlier than usual"
+      }[weatherMood.mood] || "keep an eye on conditions";
+      return `Today's news chatter: "${weatherMood.text}" — maybe ${advice}`;
+    }
+
     (function () {
       const WEATHER_FEED_URL = "https://rss.app/feeds/tRcMwW2Kz8Jl5nNn.xml";
 
       function stripHtml(html) {
         const doc = new DOMParser().parseFromString(html, "text/html");
         return (doc.body.textContent || "").replace(/\s+/g, " ").trim();
-      }
-      function safeUrl(raw) {
-        try {
-          const u = new URL(raw, location.href);
-          return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
-        } catch {
-          return "";
-        }
       }
       function timeAgo(dateStr) {
         const d = new Date(dateStr);
@@ -336,6 +377,7 @@
             statusEl.textContent = "No stories in the feed right now.";
             return;
           }
+          weatherMood = detectWeatherMood(items);
           statusEl.style.display = "none";
           itemsEl.innerHTML = "";
           items.forEach(it => {
@@ -410,6 +452,7 @@
     let startLatLon = null;
     let pickingOnMap = false;
     let mapInteracted = false;
+    let lastRenderState = null; // { target, sLat, sLon, isReturn, startText } — feeds re-roll/share
 
     // Init map
     mainMap = L.map("mainMap").setView([20, 0], 2);
@@ -541,13 +584,6 @@
       return from || to || "now";
     }
 
-    function estimateLeaveHours(target) {
-      // Still a rough demo estimate (labelled as such in the UI) — separate
-      // concern from target selection.
-      if (luckyMode !== "both") return null;
-      return 2 + Math.floor(Math.random() * 10); // 2–12 h for demo
-    }
-
     function showPlainMessage(title, desc) {
       document.getElementById("targetName").textContent = title;
       document.getElementById("targetDesc").textContent = desc;
@@ -559,6 +595,163 @@
       document.getElementById("resultMap").innerHTML = "";
       document.getElementById("routesTitle").style.display = "none";
       document.getElementById("routes").innerHTML = "";
+      document.getElementById("rerollRow").style.display = "none";
+      document.getElementById("result").classList.add("visible");
+      document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+    }
+
+    function currentModeOpts() {
+      return {
+        allowWalk: document.getElementById("allowWalk").checked,
+        allowBike: document.getElementById("allowBike").checked,
+        allowCar: document.getElementById("allowCar").checked,
+        preferPublic: document.getElementById("preferPublic").checked,
+        allowWeird: document.getElementById("allowWeird").checked
+      };
+    }
+
+    // Turns the (real, mode-aware) hours from route #1 into either a "leave
+    // by" deadline against the chosen time-window end date, or a plain
+    // door-to-door estimate when the window is just "now". Hidden entirely
+    // when "Use time estimation" is unchecked.
+    function updateCountdown(route0, isReturn) {
+      const cd = document.getElementById("countdown");
+      if (!document.getElementById("useEstimate").checked || !route0) {
+        cd.style.display = "none";
+        return;
+      }
+      const hours = isReturn ? route0.roundTripHours : route0.hours;
+      const label = isReturn ? "round trip" : "one-way";
+      cd.style.display = "block";
+
+      if (document.getElementById("nowCheck").checked) {
+        cd.textContent = `Estimated ${label}: ~${hours}h door-to-door (leave whenever)`;
+        return;
+      }
+      const endStr = document.getElementById("datePickEnd").value || document.getElementById("datePick").value;
+      if (!endStr) {
+        cd.textContent = `Estimated ${label}: ~${hours}h door-to-door`;
+        return;
+      }
+      const deadline = new Date(endStr + "T23:59:59");
+      const leaveBy = new Date(deadline.getTime() - hours * 3600000);
+      if (isNaN(deadline.getTime())) {
+        cd.textContent = `Estimated ${label}: ~${hours}h door-to-door`;
+      } else if (leaveBy < new Date()) {
+        cd.textContent = `⚠️ Cutting it close — even leaving right now (~${hours}h trip) you'd land right around the ${endStr} deadline`;
+      } else {
+        cd.textContent = `Leave by ${leaveBy.toLocaleString()} to make the ${endStr} deadline (~${hours}h trip)`;
+      }
+    }
+
+    // Renders the two route cards for a given target/start and updates the
+    // countdown from route #1 — the one piece that both a fresh search and
+    // "Re-roll routes" need, so it's shared rather than duplicated.
+    function renderRoutes(target, sLat, sLon, isReturn, startText) {
+      const modeOpts = currentModeOpts();
+      const routesEl = document.getElementById("routes");
+      routesEl.innerHTML = "";
+      let route0 = null;
+      for (let i = 0; i < 2; i++) {
+        const wLine = i === 0 ? weatherFlavorLine() : null;
+        const routeResult = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn, modeOpts, i, wLine);
+        if (i === 0) route0 = routeResult;
+        const div = document.createElement("div");
+        div.className = "route";
+        div.innerHTML = `
+          <div class="route-header">
+            <div class="route-num">${i + 1}</div>
+            <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
+          </div>
+          <div class="route-meta">${routeResult.hours}h one-way${isReturn ? ` · ${routeResult.roundTripHours}h round trip` : ""} · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
+          <ul class="stages">${routeResult.stages.map(s => `<li>${s}</li>`).join("")}</ul>
+        `;
+        routesEl.appendChild(div);
+      }
+      updateCountdown(route0, isReturn);
+    }
+
+    // Renders a full result — target card, photo, map, routes — shared by a
+    // fresh live search and by replaying a target loaded from a share link.
+    function renderTarget(target, { widened = false, sLat, sLon, isReturn, startText } = {}) {
+      document.getElementById("routesTitle").style.display = "block";
+      document.getElementById("targetName").textContent = target.name;
+      document.getElementById("targetDesc").textContent = target.desc +
+        (widened ? " — nothing local matched, so here's a real live news story instead" : "");
+
+      // GPS location — plain coordinates plus a live link to view it on OSM.
+      document.getElementById("targetGps").innerHTML =
+        `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
+        `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
+
+      // Closest available picture — from the OSM element's own tags if it
+      // has one, otherwise a one-off lookup of its Wikipedia thumbnail.
+      // Built as DOM nodes (not innerHTML string-building) since target.name
+      // / photoUrl can come from external OSM tags or news headlines and
+      // shouldn't be trusted as raw HTML.
+      const photoEl = document.getElementById("targetPhoto");
+      function renderPhoto(url) {
+        photoEl.innerHTML = "";
+        const safeSrc = safeUrl(url || "");
+        if (!safeSrc) {
+          photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
+          return;
+        }
+        const img = document.createElement("img");
+        img.src = safeSrc;
+        img.alt = target.name;
+        img.loading = "lazy";
+        img.addEventListener("error", () => {
+          photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
+        });
+        photoEl.appendChild(img);
+      }
+      if (target.photoUrl) {
+        renderPhoto(target.photoUrl);
+      } else if (target.wikipedia) {
+        photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
+        TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(renderPhoto);
+      } else {
+        photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
+      }
+
+      const contactEl = document.getElementById("targetContact");
+      contactEl.innerHTML = "";
+      const safeLink = safeUrl(target.link || "");
+      if (safeLink) {
+        const a = document.createElement("a");
+        a.href = safeLink;
+        a.target = "_blank";
+        a.rel = "noopener";
+        a.textContent = "More info →";
+        contactEl.appendChild(a);
+      } else {
+        contactEl.textContent = "No extra link";
+      }
+
+      document.getElementById("modeTag").textContent =
+        luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
+        (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() +
+        " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
+
+      // Result map
+      if (resultMap) resultMap.remove();
+      resultMap = L.map("resultMap").setView([(sLat + target.lat) / 2, (sLon + target.lon) / 2], 3);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap", maxZoom: 18
+      }).addTo(resultMap);
+      L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
+      L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
+      resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
+      L.polyline([[sLat, sLon], [target.lat, target.lon]], {
+        color: "#ff6b35", weight: 3, dashArray: "8,8"
+      }).addTo(resultMap);
+
+      renderRoutes(target, sLat, sLon, isReturn, startText);
+
+      lastRenderState = { target, sLat, sLon, isReturn, startText };
+      document.getElementById("rerollRow").style.display = "flex";
+
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
     }
@@ -617,87 +810,12 @@
 
         const target = found.target;
         const isReturn = document.getElementById("tripReturn").checked;
-        const leaveHours = estimateLeaveHours(target);
-
-        document.getElementById("routesTitle").style.display = "block";
-        document.getElementById("targetName").textContent = target.name;
-        document.getElementById("targetDesc").textContent = target.desc +
-          (found.widened ? " — nothing local matched, so here's a real live news story instead" : "");
-
-        // GPS location — plain coordinates plus a live link to view it on OSM.
-        document.getElementById("targetGps").innerHTML =
-          `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
-          `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
-
-        // Closest available picture — from the OSM element's own tags if it
-        // has one, otherwise a one-off lookup of its Wikipedia thumbnail.
-        const photoEl = document.getElementById("targetPhoto");
-        if (target.photoUrl) {
-          photoEl.innerHTML = `<img src="${target.photoUrl}" alt="${target.name}" loading="lazy" onerror="this.parentElement.innerHTML='<span class=&quot;photo-placeholder&quot;>No photo available</span>'">`;
-        } else if (target.wikipedia) {
-          photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
-          TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(url => {
-            photoEl.innerHTML = url
-              ? `<img src="${url}" alt="${target.name}" loading="lazy">`
-              : `<span class="photo-placeholder">No photo available</span>`;
-          });
-        } else {
-          photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
-        }
-
-        const cd = document.getElementById("countdown");
-        if (leaveHours !== null) {
-          cd.style.display = "block";
-          cd.textContent = `Last possible leave in ~${leaveHours} hours (estimation)`;
-        } else {
-          cd.style.display = "none";
-        }
-
-        document.getElementById("targetContact").innerHTML = target.link
-          ? `<a href="${target.link}" target="_blank" rel="noopener">More info →</a>`
-          : "No extra link";
-
-        document.getElementById("modeTag").textContent =
-          luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
-          (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() +
-          " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
 
         // Start coords
         let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
         let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
 
-        // Result map
-        if (resultMap) resultMap.remove();
-        resultMap = L.map("resultMap").setView([(sLat + target.lat) / 2, (sLon + target.lon) / 2], 3);
-        L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-          attribution: "© OpenStreetMap", maxZoom: 18
-        }).addTo(resultMap);
-        L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
-        L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
-        resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
-        L.polyline([[sLat, sLon], [target.lat, target.lon]], {
-          color: "#ff6b35", weight: 3, dashArray: "8,8"
-        }).addTo(resultMap);
-
-        // Routes — funny on purpose: silly transport, real distance underneath
-        const routesEl = document.getElementById("routes");
-        routesEl.innerHTML = "";
-        for (let i = 0; i < 2; i++) {
-          const stages = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn);
-          const div = document.createElement("div");
-          div.className = "route";
-          div.innerHTML = `
-            <div class="route-header">
-              <div class="route-num">${i + 1}</div>
-              <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
-            </div>
-            <ul class="stages">${stages.map(s => `<li>${s}</li>`).join("")}</ul>
-          `;
-          routesEl.appendChild(div);
-        }
-
-        document.getElementById("result").classList.add("visible");
-        document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+        renderTarget(target, { widened: found.widened, sLat, sLon, isReturn, startText });
       } catch (err) {
         console.error(err);
         setStatus("");
@@ -715,6 +833,92 @@
         goBtn.textContent = originalLabel;
       }
     });
+
+    // Re-roll routes only — same target, same start, brand-new comedy +
+    // mode plan (picks up any transport-checkbox changes since the search).
+    document.getElementById("rerollRoutesBtn").addEventListener("click", () => {
+      if (!lastRenderState) return;
+      const { target, sLat, sLon, isReturn, startText } = lastRenderState;
+      renderRoutes(target, sLat, sLon, isReturn, startText);
+    });
+
+    // Re-roll target only — same start point, mode, filters and keyword;
+    // just runs the normal search again, which is exactly what that means.
+    document.getElementById("rerollTargetBtn").addEventListener("click", () => {
+      document.getElementById("go").click();
+    });
+
+    // Share — encodes the current target + start in the URL so it can be
+    // pasted to someone else (or bookmarked) and replayed read-only via the
+    // loader below. No backend, no accounts: the URL *is* the save file.
+    document.getElementById("shareBtn").addEventListener("click", async () => {
+      if (!lastRenderState) return;
+      const { target, sLat, sLon, isReturn, startText } = lastRenderState;
+      const params = new URLSearchParams({
+        slat: sLat, slon: sLon, sname: startText || "",
+        tlat: target.lat, tlon: target.lon, tname: target.name,
+        tdesc: target.desc, tloc: target.loc || "", tlink: target.link || "",
+        tphoto: target.photoUrl || "", tsource: target.source || "osm",
+        mode: luckyMode, sec: secFilter, trip: isReturn ? "return" : "oneway"
+      });
+      const url = `${location.origin}${location.pathname}?${params.toString()}`;
+      try {
+        await navigator.clipboard.writeText(url);
+        setStatus("Share link copied to clipboard!");
+      } catch {
+        setStatus("Couldn't copy automatically — here's the link: " + url);
+      }
+    });
+
+    // On load, replay a shared result straight from the URL instead of
+    // running a live search — same rendering path (renderTarget), just fed
+    // a target that was already found rather than a fresh one.
+    (function loadSharedResultFromUrl() {
+      const params = new URLSearchParams(location.search);
+      const tlat = parseFloat(params.get("tlat"));
+      const tlon = parseFloat(params.get("tlon"));
+      if (!params.has("tname") || isNaN(tlat) || isNaN(tlon)) return;
+
+      const slat = parseFloat(params.get("slat"));
+      const slon = parseFloat(params.get("slon"));
+      const hasStart = !isNaN(slat) && !isNaN(slon);
+
+      if (params.get("mode")) {
+        luckyMode = params.get("mode");
+        document.querySelectorAll(".lucky-btn").forEach(b => b.classList.toggle("active", b.dataset.lucky === luckyMode));
+      }
+      if (params.get("sec")) {
+        secFilter = params.get("sec");
+        document.querySelectorAll(".sec-btn").forEach(b => b.classList.toggle("active", b.dataset.sec === secFilter));
+      }
+      const isReturn = params.get("trip") !== "oneway";
+      document.getElementById("tripReturn").checked = isReturn;
+      document.getElementById("tripOneWay").checked = !isReturn;
+
+      const startText = params.get("sname") || "";
+      if (startText) document.getElementById("start").value = startText;
+      if (hasStart) {
+        startLatLon = { lat: slat, lon: slon };
+        mapInteracted = true;
+      }
+
+      const target = {
+        name: params.get("tname") || "Shared target",
+        desc: params.get("tdesc") || "",
+        loc: params.get("tloc") || "",
+        lat: tlat, lon: tlon,
+        link: params.get("tlink") || null,
+        photoUrl: params.get("tphoto") || null,
+        source: params.get("tsource") || "osm"
+      };
+
+      const sLat = hasStart ? slat : tlat;
+      const sLon = hasStart ? slon : tlon;
+      mainMap.setView([sLat, sLon], 6);
+
+      setStatus("Showing a shared result — hit \"I'm Feeling Lucky\" for a fresh one.");
+      renderTarget(target, { sLat, sLon, isReturn, startText });
+    })();
   </script>
 </body>
 </html>

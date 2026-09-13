@@ -351,6 +351,97 @@ let lastOverpassCall = 0;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   }
 
+  // ---------- Mode-aware trip planning ----------
+  // Turns "X km away" into actual legs (walk/bike/car/bus/train/flight)
+  // honoring the transport checkboxes, with plausible average speeds and
+  // per-leg overhead — still an estimate, but one that responds to real
+  // distance and real choices instead of a flat random number.
+  const MODE_SPEED_KMH = { walk: 4.5, bike: 15, car: 75, bus: 50, train: 90, flight: 750 };
+  // Fixed overhead per leg: waiting for a bus, airport check-in, etc.
+  const MODE_OVERHEAD_H = { walk: 0, bike: 0, car: 0.15, bus: 0.3, train: 0.35, flight: 2.5 };
+  // Real routes are never as the crow flies — pad ground/air legs for
+  // roads, rail curves and flight paths.
+  const MODE_ROAD_FACTOR = { walk: 1.2, bike: 1.25, car: 1.3, bus: 1.3, train: 1.15, flight: 1.05 };
+  const MODE_NOUN = {
+    walk: "on foot", bike: "by bike", car: "by car",
+    bus: "by bus", train: "by train", flight: "by plane"
+  };
+  const MODE_PLAIN = {
+    walk: "walking", bike: "bike", car: "car",
+    bus: "bus", train: "train", flight: "plane"
+  };
+
+  function legHours(mode, km) {
+    return (km * MODE_ROAD_FACTOR[mode]) / MODE_SPEED_KMH[mode] + MODE_OVERHEAD_H[mode];
+  }
+
+  // Picks a realistic mode (or short chain of modes) for a given distance,
+  // honoring the transport checkboxes. `variant` (0 or 1) nudges the second
+  // generated route towards a genuinely different plan — e.g. public
+  // transport instead of a car — rather than repeating the first almost
+  // verbatim.
+  function planLegs(km, opts, variant) {
+    const { allowWalk, allowBike, allowCar, preferPublic } = opts;
+    const publicFirst = preferPublic || variant === 1;
+
+    if (km < 1.5) {
+      if (allowWalk) return [{ mode: "walk", km, label: "" }];
+      if (allowBike) return [{ mode: "bike", km, label: "" }];
+      return [{ mode: publicFirst ? "bus" : "car", km, label: "" }];
+    }
+    if (km < 8) {
+      if (allowBike && !publicFirst && km < 6) return [{ mode: "bike", km, label: "" }];
+      if (publicFirst) return [{ mode: "bus", km, label: "" }];
+      if (allowCar) return [{ mode: "car", km, label: "" }];
+      if (allowWalk) return [{ mode: "walk", km, label: "" }];
+      return [{ mode: "bus", km, label: "" }];
+    }
+    if (km < 60) {
+      if (publicFirst) return [{ mode: "bus", km, label: "" }];
+      if (allowCar) return [{ mode: "car", km, label: "" }];
+      return [{ mode: "bus", km, label: "" }];
+    }
+    if (km < 400) {
+      if (publicFirst) return [{ mode: "train", km, label: "" }];
+      if (allowCar) return [{ mode: "car", km, label: "" }];
+      return [{ mode: "train", km, label: "" }];
+    }
+    if (km < 1200) {
+      if (allowCar && !publicFirst) return [{ mode: "car", km, label: "" }];
+      return [{ mode: "train", km, label: "" }];
+    }
+
+    // Long-haul is the one case that's genuinely more than a single leg —
+    // you still have to actually get to an airport first.
+    const hop = 12 + Math.random() * 18;
+    const hopMode = allowCar ? "car" : (allowBike && hop < 10 ? "bike" : (allowWalk && hop < 3 ? "walk" : "bus"));
+    return [
+      { mode: hopMode, km: hop, label: "to the airport" },
+      { mode: "flight", km: Math.max(km - hop * 2, 50), label: "" },
+      { mode: hopMode, km: hop, label: "from the airport" }
+    ];
+  }
+
+  function totalHours(legs) {
+    return legs.reduce((sum, leg) => sum + legHours(leg.mode, leg.km), 0);
+  }
+
+  // A wink to the "Weird vehicles (higher rudness)" checkbox: a rough,
+  // deliberately silly score for how much this itinerary defies common
+  // sense — flavor, not a real metric.
+  function rudenessScore(legs, opts) {
+    let score = 8 + Math.round(Math.random() * 12);
+    if (opts.allowWeird) score += 35 + Math.round(Math.random() * 20);
+    if (legs.some(l => l.mode === "flight")) score += 10;
+    if (legs.length > 1) score += 5;
+    return Math.max(0, Math.min(100, score));
+  }
+
+  function rudenessBadge(score) {
+    const face = score >= 70 ? "😈" : score >= 40 ? "😏" : "😇";
+    return `${face} Rudeness ${score}%`;
+  }
+
   // ---------- Funny route ----------
   const FUNNY_VEHICLES = [
     "a caffeinated pigeon courier", "a shopping cart with one wobbly wheel",
@@ -378,21 +469,60 @@ let lastOverpassCall = 0;
     return "";
   }
 
-  function buildFunnyRoute(startName, target, startLat, startLon, isReturn) {
+  // One leg's stage line: real mode + real (padded) distance/time, with an
+  // optional "weird vehicle" reskin when that checkbox is on — the number
+  // still reflects the underlying mode's speed, only the label gets silly.
+  function legStageText(leg, opts, isFirst, isMain, target) {
+    const h = legHours(leg.mode, leg.km);
+    const kmLabel = `${Math.round(leg.km).toLocaleString()} km`;
+    const timeLabel = h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`;
+    const weird = opts.allowWeird && leg.mode !== "flight" && Math.random() < 0.5;
+    const vehiclePhrase = weird
+      ? `aboard ${pick(FUNNY_VEHICLES)} (moving at roughly ${MODE_PLAIN[leg.mode]} speed, scientifically dubious)`
+      : `travelling ${MODE_NOUN[leg.mode]}`;
+    const destPhrase = isMain ? ` towards ${target.loc}` : (leg.label ? ` ${leg.label}` : "");
+    const verb = isFirst ? "Head out" : "Continue";
+    const joke = isMain ? distanceJoke(Math.round(leg.km)) : "";
+    return `${verb}${destPhrase} ${vehiclePhrase} — ${kmLabel}, about ${timeLabel}${joke}`;
+  }
+
+  // Builds a full route: real mode-aware legs (driven by the transport
+  // checkboxes) dressed up with comedy, plus the actual timing/rudeness
+  // numbers that drive the UI's countdown and badges.
+  function buildFunnyRoute(startName, target, startLat, startLon, isReturn, opts = {}, variant = 0, weatherLine = null) {
+    const options = {
+      allowWalk: opts.allowWalk !== false,
+      allowBike: opts.allowBike !== false,
+      allowCar: opts.allowCar !== false,
+      preferPublic: !!opts.preferPublic,
+      allowWeird: !!opts.allowWeird
+    };
     const stages = [];
     const from = startName || "your current position";
-    stages.push(`Leave ${from} aboard ${pick(FUNNY_VEHICLES)}`);
-    stages.push(`Stop at ${pick(FUNNY_HUBS)} to ask for directions (they will be confidently wrong)`);
+    const hasCoords = typeof startLat === "number" && typeof startLon === "number";
+    const km = hasCoords ? haversineKm(startLat, startLon, target.lat, target.lon) : 0;
 
-    let distanceLabel = "";
-    if (typeof startLat === "number" && typeof startLon === "number") {
-      const km = Math.round(haversineKm(startLat, startLon, target.lat, target.lon));
-      distanceLabel = ` — roughly ${km.toLocaleString()} km${distanceJoke(km)}`;
-    }
-    stages.push(`Cover the distance to ${target.loc} via the scenic, deeply unnecessary route${distanceLabel}`);
+    if (weatherLine) stages.push(weatherLine);
+    stages.push(`Leave ${from}`);
+
+    const legs = hasCoords ? planLegs(km, options, variant) : [{ mode: "car", km: 0, label: "" }];
+    const mainIdx = legs.reduce((best, l, i) => (l.km > legs[best].km ? i : best), 0);
+    legs.forEach((leg, i) => stages.push(legStageText(leg, options, i === 0, i === mainIdx, target)));
+
+    stages.push(`Stop at ${pick(FUNNY_HUBS)} to ask for directions (they will be confidently wrong)`);
     stages.push(`Arrive at ${target.name}, slightly dizzy but triumphant`);
-    if (isReturn) stages.push(`Return leg: same nonsense, reversed, aboard ${pick(FUNNY_VEHICLES)}`);
-    return stages;
+
+    const oneWayHours = totalHours(legs);
+    if (isReturn) {
+      stages.push(`Return leg: same route, reversed${options.allowWeird ? `, aboard ${pick(FUNNY_VEHICLES)}` : ""}`);
+    }
+
+    return {
+      stages,
+      hours: Math.round(oneWayHours * 10) / 10,
+      roundTripHours: Math.round(oneWayHours * 2 * 10) / 10,
+      rudeness: rudenessScore(legs, options)
+    };
   }
 
   const KEYWORD_IDEAS = [
@@ -408,6 +538,7 @@ let lastOverpassCall = 0;
     fetchNewsTarget,
     fetchWikipediaThumbnail,
     buildFunnyRoute,
+    rudenessBadge,
     haversineKm,
     pick,
     KEYWORD_IDEAS
