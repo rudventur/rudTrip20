@@ -155,6 +155,70 @@
     .wt-item h4 a:hover { color: var(--accent2); }
     .wt-item p { font-size: 0.72rem; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
     .wt-item .wt-meta { font-size: 0.65rem; color: var(--muted); opacity: 0.75; margin-top: 2px; }
+
+    /* RudVentur Universe map (draggable box organizer) */
+    #rvuSection { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 14px; margin-bottom: 16px; }
+    #rvuSection summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #rvuSection summary::-webkit-details-marker { display: none; }
+    #rvuSection summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
+    .rvu-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .rvu-toolbar button {
+      padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-weight: 600; font-size: 0.8rem; cursor: pointer;
+    }
+    .rvu-toolbar button:hover:not(:disabled) { border-color: var(--accent2); }
+    .rvu-toolbar button.rvu-danger { color: #ff8577; }
+    .rvu-toolbar button.rvu-danger:hover:not(:disabled) { border-color: #ff6b35; }
+    .rvu-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .rvu-status { font-size: 0.76rem; color: var(--muted); margin-left: auto; }
+    .rvu-scroll { overflow-x: auto; border-radius: 10px; }
+    .rvu-board {
+      position: relative; width: 860px; max-width: none; height: 600px;
+      background:
+        linear-gradient(90deg, var(--border) 1px, transparent 1px),
+        linear-gradient(var(--border) 1px, transparent 1px);
+      background-size: 32px 32px;
+      background-color: var(--bg);
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    .rvu-box {
+      position: absolute; background: var(--card); border: 2px solid var(--border); border-radius: 10px;
+      display: flex; align-items: center; justify-content: center; cursor: move;
+      min-width: 80px; min-height: 80px; z-index: 10; transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .rvu-box.rvu-selected { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.3); z-index: 20; }
+    .rvu-box.rvu-center { background: var(--accent); border-color: var(--accent); }
+    .rvu-box.rvu-center .rvu-box-label { color: #111; }
+    .rvu-box.rvu-center.rvu-selected { border-color: var(--accent2); }
+    .rvu-box-label { font-size: 0.78rem; font-weight: 700; text-align: center; padding: 6px 10px; word-break: break-word; line-height: 1.3; color: var(--text); pointer-events: none; }
+    .rvu-link-icon {
+      position: absolute; top: 5px; right: 5px; width: 18px; height: 18px; background: var(--accent2);
+      color: #111; border-radius: 50%; font-size: 11px; display: none; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 5; font-weight: 700;
+    }
+    .rvu-box.rvu-has-link .rvu-link-icon { display: flex; }
+    .rvu-resize-handle {
+      position: absolute; width: 14px; height: 14px; right: -7px; bottom: -7px;
+      background: var(--accent2); border: 2px solid var(--card); border-radius: 50%;
+      cursor: nwse-resize; z-index: 30; opacity: 0; transition: opacity 0.15s;
+    }
+    .rvu-box.rvu-selected .rvu-resize-handle, .rvu-box:hover .rvu-resize-handle { opacity: 1; }
+    .rvu-hint { font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+    #rvuModalOverlay {
+      display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.55); z-index: 4000;
+      align-items: center; justify-content: center; padding: 16px;
+    }
+    #rvuModalOverlay.rvu-show { display: flex; }
+    #rvuModal { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; width: 340px; max-width: 100%; }
+    #rvuModal h2 { font-size: 1rem; margin-bottom: 14px; color: var(--text); }
+    #rvuModal label { display: block; font-size: 0.72rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; margin: 12px 0 4px; }
+    #rvuModal input { width: 100%; padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg); color: var(--text); font-size: 0.88rem; }
+    #rvuModal input:focus { outline: none; border-color: var(--accent2); }
+    .rvu-modal-actions { display: flex; gap: 8px; margin-top: 18px; justify-content: flex-end; }
+    .rvu-modal-actions button { padding: 8px 16px; border-radius: 8px; border: none; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
+    .rvu-modal-actions .rvu-primary { background: var(--accent2); color: #111; }
+    .rvu-modal-actions .rvu-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border) !important; }
   </style>
 </head>
 <body>
@@ -169,6 +233,21 @@
       <summary>🌦️ Live Weather News <span class="wt-toggle">tap to expand</span></summary>
       <div id="weatherStatus">Loading live feed…</div>
       <div id="weatherItems"></div>
+    </details>
+
+    <!-- RudVentur Universe map: drag/resize boxes linking to the rest of the RudVentur network -->
+    <details id="rvuSection">
+      <summary>🗺️ RudVentur Universe Map <span class="wt-toggle">tap to expand</span></summary>
+      <div class="rvu-toolbar">
+        <button id="rvuAdd">＋ Add box</button>
+        <button id="rvuEdit" disabled>Edit</button>
+        <button id="rvuDelete" class="rvu-danger" disabled>Delete</button>
+        <span class="rvu-status" id="rvuStatus">Click a box to select</span>
+      </div>
+      <div class="rvu-scroll">
+        <div class="rvu-board" id="rvuBoard"></div>
+      </div>
+      <p class="rvu-hint">Drag boxes to move • drag the cyan dot to resize (stays square) • double-click a box to rename or link it • the ↗ badge opens its link.</p>
     </details>
 
     <!-- Main Lucky modes -->
@@ -278,6 +357,21 @@
     </div>
 
     <footer>RudVentur Feeling Lucky • Live random search via OpenStreetMap (Overpass API), with a live free-news fallback (GDELT) • Routes are deliberately funny; timing is still an estimate</footer>
+  </div>
+
+  <!-- Universe map edit modal -->
+  <div id="rvuModalOverlay">
+    <div id="rvuModal">
+      <h2>Edit box</h2>
+      <label for="rvuInputLabel">Label</label>
+      <input type="text" id="rvuInputLabel" placeholder="Box name">
+      <label for="rvuInputUrl">Link (optional)</label>
+      <input type="url" id="rvuInputUrl" placeholder="https://...">
+      <div class="rvu-modal-actions">
+        <button class="rvu-secondary" id="rvuCancel">Cancel</button>
+        <button class="rvu-primary" id="rvuSave">Save</button>
+      </div>
+    </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -918,6 +1012,273 @@
 
       setStatus("Showing a shared result — hit \"I'm Feeling Lucky\" for a fresh one.");
       renderTarget(target, { sLat, sLon, isReturn, startText });
+    })();
+  </script>
+
+  <script>
+    // ---- RudVentur Universe map: a small draggable/resizable box organizer ----
+    // Self-contained (own state, own element ids) so it can't collide with the
+    // Lucky search engine above. Nothing here persists across a reload — it's a
+    // toy for exploring/rearranging the network, not a saved layout.
+    (function () {
+      const initialBoxes = [
+        { id: 0, label: "RudVentur Universe", x: 350, y: 240, size: 180, url: "https://www.rudventur.com", isCenter: true },
+        { id: 1, label: "ChemVentur Multi", x: 110, y: 80, size: 130, url: "", isCenter: false },
+        { id: 2, label: "Map Merger Venti", x: 590, y: 80, size: 130, url: "", isCenter: false },
+        { id: 3, label: "Cheese Ouiji Empire", x: 30, y: 280, size: 140, url: "", isCenter: false },
+        { id: 4, label: "Windows 13", x: 680, y: 280, size: 120, url: "", isCenter: false },
+        { id: 5, label: "Universe Map", x: 150, y: 450, size: 130, url: "", isCenter: false },
+        { id: 6, label: "RudVentur Social", x: 560, y: 450, size: 140, url: "", isCenter: false }
+      ];
+
+      let boxes = JSON.parse(JSON.stringify(initialBoxes));
+      let nextId = Math.max(...boxes.map(b => b.id)) + 1;
+      let selectedId = null;
+      let isDragging = false, isResizing = false;
+      let dragOffsetX = 0, dragOffsetY = 0;
+      let resizeStartSize = 0, resizeStartX = 0, resizeStartY = 0;
+
+      const board = document.getElementById('rvuBoard');
+      const btnAdd = document.getElementById('rvuAdd');
+      const btnEdit = document.getElementById('rvuEdit');
+      const btnDelete = document.getElementById('rvuDelete');
+      const statusEl = document.getElementById('rvuStatus');
+      const modalOverlay = document.getElementById('rvuModalOverlay');
+      const inputLabel = document.getElementById('rvuInputLabel');
+      const inputUrl = document.getElementById('rvuInputUrl');
+      const btnSave = document.getElementById('rvuSave');
+      const btnCancel = document.getElementById('rvuCancel');
+
+      // Reuses the page's URL sanitizer (defined above) when present, so a
+      // pasted javascript: URL can't run when the link badge is clicked.
+      function rvuSafeUrl(raw) {
+        if (typeof safeUrl === 'function') return safeUrl(raw);
+        try {
+          const u = new URL(raw, location.href);
+          return (u.protocol === 'http:' || u.protocol === 'https:') ? u.href : '';
+        } catch {
+          return '';
+        }
+      }
+
+      function createBoxElement(box) {
+        const el = document.createElement('div');
+        el.className = 'rvu-box' + (box.isCenter ? ' rvu-center' : '') + (box.url ? ' rvu-has-link' : '');
+        el.dataset.id = box.id;
+        el.style.left = box.x + 'px';
+        el.style.top = box.y + 'px';
+        el.style.width = box.size + 'px';
+        el.style.height = box.size + 'px';
+
+        const label = document.createElement('div');
+        label.className = 'rvu-box-label';
+        label.textContent = box.label;
+        el.appendChild(label);
+
+        const linkIcon = document.createElement('div');
+        linkIcon.className = 'rvu-link-icon';
+        linkIcon.textContent = '↗';
+        linkIcon.title = box.url || '';
+        linkIcon.addEventListener('mousedown', (e) => e.stopPropagation());
+        linkIcon.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const safe = rvuSafeUrl(box.url);
+          if (safe) window.open(safe, '_blank', 'noopener');
+        });
+        el.appendChild(linkIcon);
+
+        const handle = document.createElement('div');
+        handle.className = 'rvu-resize-handle';
+        handle.addEventListener('mousedown', startResize);
+        el.appendChild(handle);
+
+        el.addEventListener('mousedown', startDrag);
+        el.addEventListener('dblclick', () => openEditModal(box.id));
+
+        return el;
+      }
+
+      function render() {
+        board.innerHTML = '';
+        boxes.forEach(box => {
+          const el = createBoxElement(box);
+          if (box.id === selectedId) el.classList.add('rvu-selected');
+          board.appendChild(el);
+        });
+        updateToolbar();
+      }
+
+      function updateToolbar() {
+        const hasSelection = selectedId !== null;
+        btnEdit.disabled = !hasSelection;
+        btnDelete.disabled = !hasSelection;
+        statusEl.textContent = hasSelection
+          ? `Selected: "${boxes.find(b => b.id === selectedId)?.label}"`
+          : 'Click a box to select';
+      }
+
+      // Toggles the .rvu-selected class in place instead of calling render():
+      // a full re-render on every mousedown would replace the box's DOM node
+      // between the two clicks of a double-click, which stops the browser
+      // from ever recognizing it as a double-click.
+      function selectBox(id) {
+        if (id === selectedId) return;
+        const prevEl = selectedId !== null ? board.querySelector(`[data-id="${selectedId}"]`) : null;
+        if (prevEl) prevEl.classList.remove('rvu-selected');
+        selectedId = id;
+        const nextEl = id !== null ? board.querySelector(`[data-id="${id}"]`) : null;
+        if (nextEl) nextEl.classList.add('rvu-selected');
+        updateToolbar();
+      }
+
+      board.addEventListener('mousedown', (e) => {
+        if (e.target === board) selectBox(null);
+      });
+
+      function startDrag(e) {
+        if (e.target.classList.contains('rvu-resize-handle') || e.target.classList.contains('rvu-link-icon')) return;
+        e.preventDefault();
+
+        const id = parseInt(e.currentTarget.dataset.id, 10);
+        selectBox(id);
+
+        const box = boxes.find(b => b.id === id);
+        const rect = board.getBoundingClientRect();
+        isDragging = true;
+        dragOffsetX = e.clientX - rect.left - box.x;
+        dragOffsetY = e.clientY - rect.top - box.y;
+
+        document.addEventListener('mousemove', onDrag);
+        document.addEventListener('mouseup', stopDrag);
+      }
+
+      function onDrag(e) {
+        if (!isDragging || selectedId === null) return;
+        const box = boxes.find(b => b.id === selectedId);
+        if (!box) return;
+
+        const rect = board.getBoundingClientRect();
+        box.x = Math.max(0, Math.min(rect.width - box.size, e.clientX - rect.left - dragOffsetX));
+        box.y = Math.max(0, Math.min(rect.height - box.size, e.clientY - rect.top - dragOffsetY));
+
+        const el = board.querySelector(`[data-id="${selectedId}"]`);
+        if (el) {
+          el.style.left = box.x + 'px';
+          el.style.top = box.y + 'px';
+        }
+      }
+
+      function stopDrag() {
+        isDragging = false;
+        document.removeEventListener('mousemove', onDrag);
+        document.removeEventListener('mouseup', stopDrag);
+      }
+
+      function startResize(e) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        const id = parseInt(e.target.parentElement.dataset.id, 10);
+        selectBox(id);
+
+        const box = boxes.find(b => b.id === id);
+        isResizing = true;
+        resizeStartSize = box.size;
+        resizeStartX = e.clientX;
+        resizeStartY = e.clientY;
+
+        document.addEventListener('mousemove', onResize);
+        document.addEventListener('mouseup', stopResize);
+      }
+
+      function onResize(e) {
+        if (!isResizing || selectedId === null) return;
+        const box = boxes.find(b => b.id === selectedId);
+        if (!box) return;
+
+        const dx = e.clientX - resizeStartX;
+        const dy = e.clientY - resizeStartY;
+        const delta = Math.max(dx, dy);
+
+        const rect = board.getBoundingClientRect();
+        const maxSize = Math.min(rect.width - box.x, rect.height - box.y);
+        box.size = Math.min(maxSize, Math.max(80, resizeStartSize + delta));
+
+        const el = board.querySelector(`[data-id="${selectedId}"]`);
+        if (el) {
+          el.style.width = box.size + 'px';
+          el.style.height = box.size + 'px';
+        }
+      }
+
+      function stopResize() {
+        isResizing = false;
+        document.removeEventListener('mousemove', onResize);
+        document.removeEventListener('mouseup', stopResize);
+      }
+
+      btnAdd.addEventListener('click', () => {
+        const newBox = {
+          id: nextId++,
+          label: 'New box',
+          x: 40 + Math.random() * 300,
+          y: 40 + Math.random() * 200,
+          size: 120,
+          url: '',
+          isCenter: false
+        };
+        boxes.push(newBox);
+        selectBox(newBox.id);
+        openEditModal(newBox.id);
+      });
+
+      btnEdit.addEventListener('click', () => {
+        if (selectedId !== null) openEditModal(selectedId);
+      });
+
+      btnDelete.addEventListener('click', () => {
+        if (selectedId === null) return;
+        if (!confirm('Delete this box?')) return;
+        boxes = boxes.filter(b => b.id !== selectedId);
+        selectedId = null;
+        render();
+      });
+
+      function openEditModal(id) {
+        const box = boxes.find(b => b.id === id);
+        if (!box) return;
+        selectedId = id;
+        inputLabel.value = box.label;
+        inputUrl.value = box.url || '';
+        modalOverlay.classList.add('rvu-show');
+        inputLabel.focus();
+        render();
+      }
+
+      btnSave.addEventListener('click', () => {
+        const box = boxes.find(b => b.id === selectedId);
+        if (!box) return;
+        box.label = inputLabel.value.trim() || 'Untitled';
+        box.url = inputUrl.value.trim();
+        modalOverlay.classList.remove('rvu-show');
+        render();
+      });
+
+      btnCancel.addEventListener('click', () => {
+        modalOverlay.classList.remove('rvu-show');
+      });
+
+      modalOverlay.addEventListener('click', (e) => {
+        if (e.target === modalOverlay) modalOverlay.classList.remove('rvu-show');
+      });
+
+      document.addEventListener('keydown', (e) => {
+        if (!modalOverlay.classList.contains('rvu-show')) return;
+        if (e.key === 'Enter') btnSave.click();
+        if (e.key === 'Escape') btnCancel.click();
+      });
+
+      render();
     })();
   </script>
 </body>
