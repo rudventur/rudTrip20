@@ -46,7 +46,7 @@
     .field { margin-bottom: 12px; }
     label { display: block; font-size: 0.72rem; color: var(--muted); margin-bottom: 4px; text-transform: uppercase; letter-spacing: 0.4px; }
     .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    input[type="text"], input[type="date"] {
+    input[type="text"], input[type="date"], input[type="number"] {
       flex: 1; min-width: 140px; padding: 10px 12px; border-radius: 8px;
       border: 1px solid var(--border); background: var(--card); color: var(--text); font-size: 0.92rem;
     }
@@ -303,10 +303,22 @@
       <label>Trip type</label>
       <div class="row">
         <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
-          <input type="radio" name="tripType" id="tripReturn" checked> Return trip
+          <input type="radio" name="tripType" id="tripOneWay" checked> One-way
         </label>
         <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
-          <input type="radio" name="tripType" id="tripOneWay"> One-way
+          <input type="radio" name="tripType" id="tripReturnSame"> Return (same way)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
+          <input type="radio" name="tripType" id="tripReturnOther"> Return (different way)
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.88rem;">
+          <input type="radio" name="tripType" id="tripLoop"> Loop (multi-stop)
+        </label>
+      </div>
+      <div class="row" id="loopStopsRow" style="display:none; margin-top:8px;">
+        <label style="display:flex;align-items:center;gap:6px;text-transform:none;color:var(--text);font-size:0.85rem;">
+          Stops
+          <input type="number" id="loopStops" min="2" max="5" value="3" style="width:56px;">
         </label>
       </div>
     </div>
@@ -546,7 +558,7 @@
     let startLatLon = null;
     let pickingOnMap = false;
     let mapInteracted = false;
-    let lastRenderState = null; // { target, sLat, sLon, isReturn, startText } — feeds re-roll/share
+    let lastRenderState = null; // { tripType, sLat, sLon, startText, target } or { ..., targets } for loop — feeds re-roll/share
 
     // Init map
     mainMap = L.map("mainMap").setView([20, 0], 2);
@@ -596,6 +608,20 @@
     document.getElementById("nowCheck").addEventListener("change", e => {
       document.getElementById("datePick").disabled = e.target.checked;
       document.getElementById("datePickEnd").disabled = e.target.checked;
+    });
+
+    // Trip type — reveals the stop-count field only for the loop mode.
+    function getTripType() {
+      if (document.getElementById("tripLoop").checked) return "loop";
+      if (document.getElementById("tripReturnOther").checked) return "return-other";
+      if (document.getElementById("tripReturnSame").checked) return "return-same";
+      return "oneway";
+    }
+    document.querySelectorAll('input[name="tripType"]').forEach(r => {
+      r.addEventListener("change", () => {
+        document.getElementById("loopStopsRow").style.display =
+          document.getElementById("tripLoop").checked ? "flex" : "none";
+      });
     });
 
     // Keyword "Random" — fills the field with an inspiration term, doesn't
@@ -707,15 +733,16 @@
     // Turns the (real, mode-aware) hours from route #1 into either a "leave
     // by" deadline against the chosen time-window end date, or a plain
     // door-to-door estimate when the window is just "now". Hidden entirely
-    // when "Use time estimation" is unchecked.
-    function updateCountdown(route0, isReturn) {
+    // when "Use time estimation" is unchecked. `hasReturn` is true for any
+    // trip type that comes back to the start (return-same/other/loop).
+    function updateCountdown(route0, hasReturn) {
       const cd = document.getElementById("countdown");
       if (!document.getElementById("useEstimate").checked || !route0) {
         cd.style.display = "none";
         return;
       }
-      const hours = isReturn ? route0.roundTripHours : route0.hours;
-      const label = isReturn ? "round trip" : "one-way";
+      const hours = hasReturn ? route0.roundTripHours : route0.hours;
+      const label = hasReturn ? "round trip" : "one-way";
       cd.style.display = "block";
 
       if (document.getElementById("nowCheck").checked) {
@@ -738,17 +765,21 @@
       }
     }
 
-    // Renders the two route cards for a given target/start and updates the
-    // countdown from route #1 — the one piece that both a fresh search and
-    // "Re-roll routes" need, so it's shared rather than duplicated.
-    function renderRoutes(target, sLat, sLon, isReturn, startText) {
+    const TRIP_TYPE_LABEL = {
+      "oneway": "ONE-WAY", "return-same": "RETURN", "return-other": "RETURN (OTHER WAY)", "loop": "LOOP"
+    };
+
+    // Renders the two route cards for a single-target trip (oneway/return-
+    // same/return-other) and updates the countdown from route #1 — shared
+    // by a fresh search and by "Re-roll routes".
+    function renderRoutes(target, sLat, sLon, tripType, startText) {
       const modeOpts = currentModeOpts();
       const routesEl = document.getElementById("routes");
       routesEl.innerHTML = "";
       let route0 = null;
       for (let i = 0; i < 2; i++) {
         const wLine = i === 0 ? weatherFlavorLine() : null;
-        const routeResult = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, isReturn, modeOpts, i, wLine);
+        const routeResult = TripSearchEngine.buildFunnyRoute(startText, target, sLat, sLon, tripType, modeOpts, i, wLine);
         if (i === 0) route0 = routeResult;
         const div = document.createElement("div");
         div.className = "route";
@@ -757,34 +788,43 @@
             <div class="route-num">${i + 1}</div>
             <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
           </div>
-          <div class="route-meta">${routeResult.hours}h one-way${isReturn ? ` · ${routeResult.roundTripHours}h round trip` : ""} · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
+          <div class="route-meta">${routeResult.hours}h one-way${routeResult.roundTripHours != null ? ` · ${routeResult.roundTripHours}h round trip` : ""} · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
           <ul class="stages">${routeResult.stages.map(s => `<li>${s}</li>`).join("")}</ul>
         `;
         routesEl.appendChild(div);
       }
-      updateCountdown(route0, isReturn);
+      updateCountdown(route0, tripType !== "oneway");
     }
 
-    // Renders a full result — target card, photo, map, routes — shared by a
-    // fresh live search and by replaying a target loaded from a share link.
-    function renderTarget(target, { widened = false, sLat, sLon, isReturn, startText } = {}) {
-      document.getElementById("routesTitle").style.display = "block";
-      document.getElementById("targetName").textContent = target.name;
-      document.getElementById("targetDesc").textContent = target.desc +
-        (widened ? " — nothing local matched, so here's a real live news story instead" : "");
+    // Renders the single loop-route card for a set of stops — shared by a
+    // fresh loop search and by "Re-roll routes" on a loop result.
+    function renderLoopRoutes(targets, sLat, sLon, startText) {
+      const modeOpts = currentModeOpts();
+      const routesEl = document.getElementById("routes");
+      routesEl.innerHTML = "";
+      const wLine = weatherFlavorLine();
+      const routeResult = TripSearchEngine.buildLoopRoute(startText, targets, sLat, sLon, modeOpts, wLine);
+      const div = document.createElement("div");
+      div.className = "route";
+      div.innerHTML = `
+        <div class="route-header">
+          <div class="route-num">1</div>
+          <div class="route-title">Loop route</div>
+        </div>
+        <div class="route-meta">${routeResult.hours}h total · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
+        <ul class="stages">${routeResult.stages.map(s => `<li>${s}</li>`).join("")}</ul>
+      `;
+      routesEl.appendChild(div);
+      updateCountdown(routeResult, true);
+    }
 
-      // GPS location — plain coordinates plus a live link to view it on OSM.
-      document.getElementById("targetGps").innerHTML =
-        `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
-        `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
-
-      // Closest available picture — from the OSM element's own tags if it
-      // has one, otherwise a one-off lookup of its Wikipedia thumbnail.
-      // Built as DOM nodes (not innerHTML string-building) since target.name
-      // / photoUrl can come from external OSM tags or news headlines and
-      // shouldn't be trusted as raw HTML.
-      const photoEl = document.getElementById("targetPhoto");
-      function renderPhoto(url) {
+    // Closest available picture for a target — from its own OSM tag if it
+    // has one, otherwise a one-off Wikipedia thumbnail lookup. Built as DOM
+    // nodes (not innerHTML string-building) since target.name/photoUrl can
+    // come from external OSM tags or news headlines and shouldn't be
+    // trusted as raw HTML.
+    function renderPhotoInto(photoEl, target) {
+      function show(url) {
         photoEl.innerHTML = "";
         const safeSrc = safeUrl(url || "");
         if (!safeSrc) {
@@ -801,15 +841,16 @@
         photoEl.appendChild(img);
       }
       if (target.photoUrl) {
-        renderPhoto(target.photoUrl);
+        show(target.photoUrl);
       } else if (target.wikipedia) {
         photoEl.innerHTML = `<span class="photo-placeholder">Looking for a photo…</span>`;
-        TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(renderPhoto);
+        TripSearchEngine.fetchWikipediaThumbnail(target.wikipedia).then(show);
       } else {
         photoEl.innerHTML = `<span class="photo-placeholder">No photo available</span>`;
       }
+    }
 
-      const contactEl = document.getElementById("targetContact");
+    function renderContactInto(contactEl, target) {
       contactEl.innerHTML = "";
       const safeLink = safeUrl(target.link || "");
       if (safeLink) {
@@ -822,10 +863,28 @@
       } else {
         contactEl.textContent = "No extra link";
       }
+    }
+
+    // Renders a full single-target result — target card, photo, map, routes
+    // — shared by a fresh live search (oneway/return-same/return-other) and
+    // by replaying a target loaded from a share link.
+    function renderTarget(target, { widened = false, sLat, sLon, tripType = "oneway", startText } = {}) {
+      document.getElementById("routesTitle").style.display = "block";
+      document.getElementById("targetName").textContent = target.name;
+      document.getElementById("targetDesc").textContent = target.desc +
+        (widened ? " — nothing local matched, so here's a real live news story instead" : "");
+
+      // GPS location — plain coordinates plus a live link to view it on OSM.
+      document.getElementById("targetGps").innerHTML =
+        `📍 ${target.lat.toFixed(5)}, ${target.lon.toFixed(5)} · ` +
+        `<a href="https://www.openstreetmap.org/?mlat=${target.lat}&mlon=${target.lon}#map=17/${target.lat}/${target.lon}" target="_blank" rel="noopener">View on OSM →</a>`;
+
+      renderPhotoInto(document.getElementById("targetPhoto"), target);
+      renderContactInto(document.getElementById("targetContact"), target);
 
       document.getElementById("modeTag").textContent =
         luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
-        (isReturn ? "RETURN" : "ONE-WAY") + " • " + getTimeWindow() +
+        (TRIP_TYPE_LABEL[tripType] || tripType.toUpperCase()) + " • " + getTimeWindow() +
         " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
 
       // Result map
@@ -841,10 +900,54 @@
         color: "#ff6b35", weight: 3, dashArray: "8,8"
       }).addTo(resultMap);
 
-      renderRoutes(target, sLat, sLon, isReturn, startText);
+      renderRoutes(target, sLat, sLon, tripType, startText);
 
-      lastRenderState = { target, sLat, sLon, isReturn, startText };
+      lastRenderState = { tripType, sLat, sLon, startText, target };
       document.getElementById("rerollRow").style.display = "flex";
+      document.getElementById("shareBtn").style.display = ""; // share is supported for every single-target trip type
+
+      document.getElementById("result").classList.add("visible");
+      document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+    }
+
+    // Renders a full loop result — primary stop's card (as the "Lucky
+    // Target"), a map with every stop plotted, and the single loop route.
+    // Sharing a loop isn't supported yet (the URL scheme only carries one
+    // target), so the share button is hidden for this trip type.
+    function renderLoopResult(targets, { widened = false, sLat, sLon, startText } = {}) {
+      document.getElementById("routesTitle").style.display = "block";
+      const primary = targets[0];
+      const extra = targets.length - 1;
+      document.getElementById("targetName").textContent = extra > 0 ? `${primary.name} (+${extra} more stop${extra === 1 ? "" : "s"})` : primary.name;
+      document.getElementById("targetDesc").textContent = primary.desc +
+        (widened ? " — nothing local matched, so here's a real live news story instead" : "") +
+        (extra > 0 ? ` · Loop through ${targets.length} real stops.` : "");
+
+      document.getElementById("targetGps").innerHTML =
+        "📍 " + targets.map(t => `${t.lat.toFixed(4)}, ${t.lon.toFixed(4)}`).join(" → ");
+
+      renderPhotoInto(document.getElementById("targetPhoto"), primary);
+      renderContactInto(document.getElementById("targetContact"), primary);
+
+      document.getElementById("modeTag").textContent =
+        luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • LOOP (" + targets.length + " stops) • " + getTimeWindow();
+
+      if (resultMap) resultMap.remove();
+      resultMap = L.map("resultMap").setView([sLat, sLon], 3);
+      L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        attribution: "© OpenStreetMap", maxZoom: 18
+      }).addTo(resultMap);
+      const latlngs = [[sLat, sLon], ...targets.map(t => [t.lat, t.lon]), [sLat, sLon]];
+      L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
+      targets.forEach((t, i) => L.marker([t.lat, t.lon]).addTo(resultMap).bindPopup(`Stop ${i + 1}: ${t.name}`));
+      resultMap.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
+      L.polyline(latlngs, { color: "#ff6b35", weight: 3, dashArray: "8,8" }).addTo(resultMap);
+
+      renderLoopRoutes(targets, sLat, sLon, startText);
+
+      lastRenderState = { tripType: "loop", sLat, sLon, startText, targets };
+      document.getElementById("rerollRow").style.display = "flex";
+      document.getElementById("shareBtn").style.display = "none"; // not supported for loops yet
 
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
@@ -883,6 +986,33 @@
 
       try {
         const keyword = document.getElementById("targetKeywords").value.trim();
+        const tripType = getTripType();
+
+        // Start coords
+        let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
+        let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
+
+        if (tripType === "loop") {
+          const stops = Math.max(2, Math.min(5, parseInt(document.getElementById("loopStops").value, 10) || 3));
+
+          // News mode has no concept of "a pool of nearby real places" to
+          // sample from, so a loop in news mode just gets a single stop.
+          const found = luckyMode === "news"
+            ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { targets: [t], widened: false } : null)
+            : await TripSearchEngine.fetchRandomTargets(mainMap, luckyMode, secFilter, keyword, stops, setStatus);
+
+          if (!found || !found.targets || found.targets.length === 0) {
+            setStatus("");
+            showPlainMessage(
+              "No luck this time",
+              "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
+            );
+            return;
+          }
+
+          renderLoopResult(found.targets, { widened: found.widened, sLat, sLon, startText });
+          return;
+        }
 
         // News mode skips fetchRandomTarget (and Overpass) entirely — it's
         // a direct, fast path straight to a live headline placed on the map.
@@ -902,14 +1032,7 @@
           return;
         }
 
-        const target = found.target;
-        const isReturn = document.getElementById("tripReturn").checked;
-
-        // Start coords
-        let sLat = startLatLon ? startLatLon.lat : mainMap.getCenter().lat;
-        let sLon = startLatLon ? startLatLon.lon : mainMap.getCenter().lng;
-
-        renderTarget(target, { widened: found.widened, sLat, sLon, isReturn, startText });
+        renderTarget(found.target, { widened: found.widened, sLat, sLon, tripType, startText });
       } catch (err) {
         console.error(err);
         setStatus("");
@@ -928,12 +1051,22 @@
       }
     });
 
-    // Re-roll routes only — same target, same start, brand-new comedy +
-    // mode plan (picks up any transport-checkbox changes since the search).
+    // Re-roll routes only — same target(s), same start, brand-new comedy +
+    // mode plan. Picks up any transport-checkbox change since the search,
+    // and also a newly-selected trip type — as long as it doesn't change
+    // the result's *shape*: a loop result stays a loop (its stops are
+    // fixed) no matter what the radio says now, since turning it into
+    // one-way/return would need a fresh fetch, not just a route re-plan.
     document.getElementById("rerollRoutesBtn").addEventListener("click", () => {
       if (!lastRenderState) return;
-      const { target, sLat, sLon, isReturn, startText } = lastRenderState;
-      renderRoutes(target, sLat, sLon, isReturn, startText);
+      const { sLat, sLon, startText, target, targets } = lastRenderState;
+      if (targets) {
+        renderLoopRoutes(targets, sLat, sLon, startText);
+      } else {
+        const tripType = getTripType() === "loop" ? lastRenderState.tripType : getTripType();
+        lastRenderState.tripType = tripType;
+        renderRoutes(target, sLat, sLon, tripType, startText);
+      }
     });
 
     // Re-roll target only — same start point, mode, filters and keyword;
@@ -945,15 +1078,17 @@
     // Share — encodes the current target + start in the URL so it can be
     // pasted to someone else (or bookmarked) and replayed read-only via the
     // loader below. No backend, no accounts: the URL *is* the save file.
+    // Loops aren't supported yet (the URL only carries one target), so the
+    // button is hidden for those — see renderLoopResult.
     document.getElementById("shareBtn").addEventListener("click", async () => {
-      if (!lastRenderState) return;
-      const { target, sLat, sLon, isReturn, startText } = lastRenderState;
+      if (!lastRenderState || lastRenderState.tripType === "loop") return;
+      const { target, sLat, sLon, tripType, startText } = lastRenderState;
       const params = new URLSearchParams({
         slat: sLat, slon: sLon, sname: startText || "",
         tlat: target.lat, tlon: target.lon, tname: target.name,
         tdesc: target.desc, tloc: target.loc || "", tlink: target.link || "",
         tphoto: target.photoUrl || "", tsource: target.source || "osm",
-        mode: luckyMode, sec: secFilter, trip: isReturn ? "return" : "oneway"
+        mode: luckyMode, sec: secFilter, trip: tripType
       });
       const url = `${location.origin}${location.pathname}?${params.toString()}`;
       try {
@@ -985,9 +1120,10 @@
         secFilter = params.get("sec");
         document.querySelectorAll(".sec-btn").forEach(b => b.classList.toggle("active", b.dataset.sec === secFilter));
       }
-      const isReturn = params.get("trip") !== "oneway";
-      document.getElementById("tripReturn").checked = isReturn;
-      document.getElementById("tripOneWay").checked = !isReturn;
+      const tripType = ["return-same", "return-other"].includes(params.get("trip")) ? params.get("trip") : "oneway";
+      document.getElementById("tripOneWay").checked = tripType === "oneway";
+      document.getElementById("tripReturnSame").checked = tripType === "return-same";
+      document.getElementById("tripReturnOther").checked = tripType === "return-other";
 
       const startText = params.get("sname") || "";
       if (startText) document.getElementById("start").value = startText;
@@ -1011,7 +1147,7 @@
       mainMap.setView([sLat, sLon], 6);
 
       setStatus("Showing a shared result — hit \"I'm Feeling Lucky\" for a fresh one.");
-      renderTarget(target, { sLat, sLon, isReturn, startText });
+      renderTarget(target, { sLat, sLon, tripType, startText });
     })();
   </script>
 

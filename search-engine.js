@@ -323,6 +323,53 @@ let lastOverpassCall = 0;
     return null;
   }
 
+  // Like fetchRandomTarget, but for a loop: pulls up to `count` DISTINCT
+  // real targets from a single Overpass query (a bigger pool, sampled
+  // without replacement) rather than calling Overpass/GDELT once per stop —
+  // that would burn through both the client-side cooldown and GDELT's very
+  // real rate limit inside one click. If Overpass comes up empty, the loop
+  // degrades honestly to a single live-news stop rather than inventing
+  // anything to fill the requested count.
+  async function fetchRandomTargets(map, mode, sec, keyword, count, onStatus) {
+    const say = m => { if (onStatus) onStatus(m); };
+
+    if (canCallOverpassNow()) {
+      try {
+        const b = map.getBounds();
+        const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+        const tagPairs = tagsFor(mode, sec);
+        lastOverpassCall = Date.now();
+
+        say("Searching OpenStreetMap live in this view…");
+        const poolLimit = Math.min(60, Math.max(35, count * 15));
+        const data = await queryOverpassRace(buildOverpassQuery(bbox, tagPairs, keyword, poolLimit));
+        const pool = [];
+        for (const el of (data.elements || [])) {
+          const t = describeOsmElement(el);
+          if (t) pool.push(t);
+        }
+        if (pool.length > 0) {
+          say("");
+          for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+          }
+          return { targets: pool.slice(0, count), widened: false };
+        }
+        say("Nothing matched in this view — falling back to fresh news…");
+      } catch (err) {
+        console.warn("Live Overpass unavailable, trying live news instead:", err && err.message);
+        say("OpenStreetMap unreachable — falling back to fresh news…");
+      }
+    } else {
+      say("Overpass is cooling down — this click uses fresh news…");
+    }
+
+    const newsTarget = await fetchNewsTarget(keyword, onStatus);
+    if (newsTarget) return { targets: [newsTarget], widened: true };
+    return null;
+  }
+
   async function fetchWikipediaThumbnail(wikipediaTag) {
     try {
       const parts = wikipediaTag.split(":");
@@ -472,7 +519,10 @@ let lastOverpassCall = 0;
   // One leg's stage line: real mode + real (padded) distance/time, with an
   // optional "weird vehicle" reskin when that checkbox is on — the number
   // still reflects the underlying mode's speed, only the label gets silly.
-  function legStageText(leg, opts, isFirst, isMain, target) {
+  // `destLabel` is just the place name to print ("towards X") — a plain
+  // string so this works equally for an outbound leg (target.loc), a
+  // different-way-back return leg (the start's name), or one hop of a loop.
+  function legStageText(leg, opts, isFirst, isMain, destLabel) {
     const h = legHours(leg.mode, leg.km);
     const kmLabel = `${Math.round(leg.km).toLocaleString()} km`;
     const timeLabel = h < 1 ? `${Math.round(h * 60)} min` : `${h.toFixed(1)} h`;
@@ -480,23 +530,41 @@ let lastOverpassCall = 0;
     const vehiclePhrase = weird
       ? `aboard ${pick(FUNNY_VEHICLES)} (moving at roughly ${MODE_PLAIN[leg.mode]} speed, scientifically dubious)`
       : `travelling ${MODE_NOUN[leg.mode]}`;
-    const destPhrase = isMain ? ` towards ${target.loc}` : (leg.label ? ` ${leg.label}` : "");
+    const destPhrase = isMain ? ` towards ${destLabel}` : (leg.label ? ` ${leg.label}` : "");
     const verb = isFirst ? "Head out" : "Continue";
     const joke = isMain ? distanceJoke(Math.round(leg.km)) : "";
     return `${verb}${destPhrase} ${vehiclePhrase} — ${kmLabel}, about ${timeLabel}${joke}`;
   }
 
-  // Builds a full route: real mode-aware legs (driven by the transport
-  // checkboxes) dressed up with comedy, plus the actual timing/rudeness
-  // numbers that drive the UI's countdown and badges.
-  function buildFunnyRoute(startName, target, startLat, startLon, isReturn, opts = {}, variant = 0, weatherLine = null) {
-    const options = {
+  // Plans one directional hop (a single planLegs() call) and renders all of
+  // its stage lines in one go — the one piece shared by an outbound leg, a
+  // "return, different way" leg, and every hop of a loop.
+  function describeLegSet(legs, opts, destLabel) {
+    const mainIdx = legs.reduce((best, l, i) => (l.km > legs[best].km ? i : best), 0);
+    const lines = legs.map((leg, i) => legStageText(leg, opts, i === 0, i === mainIdx, destLabel));
+    return { lines, hours: totalHours(legs) };
+  }
+
+  function normalizeModeOpts(opts) {
+    return {
       allowWalk: opts.allowWalk !== false,
       allowBike: opts.allowBike !== false,
       allowCar: opts.allowCar !== false,
       preferPublic: !!opts.preferPublic,
       allowWeird: !!opts.allowWeird
     };
+  }
+
+  // Builds a full route: real mode-aware legs (driven by the transport
+  // checkboxes) dressed up with comedy, plus the actual timing/rudeness
+  // numbers that drive the UI's countdown and badges.
+  // `tripType` is one of "oneway" | "return-same" | "return-other":
+  //   - oneway: just the outbound leg.
+  //   - return-same: the classic "reversed" return, timed as 2x outbound.
+  //   - return-other: a genuinely different plan (and mode mix) for the
+  //     way back, timed on its own.
+  function buildFunnyRoute(startName, target, startLat, startLon, tripType = "oneway", opts = {}, variant = 0, weatherLine = null) {
+    const options = normalizeModeOpts(opts);
     const stages = [];
     const from = startName || "your current position";
     const hasCoords = typeof startLat === "number" && typeof startLon === "number";
@@ -505,23 +573,77 @@ let lastOverpassCall = 0;
     if (weatherLine) stages.push(weatherLine);
     stages.push(`Leave ${from}`);
 
-    const legs = hasCoords ? planLegs(km, options, variant) : [{ mode: "car", km: 0, label: "" }];
-    const mainIdx = legs.reduce((best, l, i) => (l.km > legs[best].km ? i : best), 0);
-    legs.forEach((leg, i) => stages.push(legStageText(leg, options, i === 0, i === mainIdx, target)));
+    const outboundLegs = hasCoords ? planLegs(km, options, variant) : [{ mode: "car", km: 0, label: "" }];
+    const outbound = describeLegSet(outboundLegs, options, target.loc);
+    stages.push(...outbound.lines);
 
     stages.push(`Stop at ${pick(FUNNY_HUBS)} to ask for directions (they will be confidently wrong)`);
     stages.push(`Arrive at ${target.name}, slightly dizzy but triumphant`);
 
-    const oneWayHours = totalHours(legs);
-    if (isReturn) {
+    let returnHours = 0;
+    if (tripType === "return-same") {
       stages.push(`Return leg: same route, reversed${options.allowWeird ? `, aboard ${pick(FUNNY_VEHICLES)}` : ""}`);
+      returnHours = outbound.hours;
+    } else if (tripType === "return-other") {
+      const returnLegs = hasCoords ? planLegs(km, options, variant === 0 ? 1 : 0) : outboundLegs;
+      const ret = describeLegSet(returnLegs, options, from);
+      stages.push(`Return leg — a completely different way back:`);
+      stages.push(...ret.lines);
+      returnHours = ret.hours;
     }
 
     return {
       stages,
-      hours: Math.round(oneWayHours * 10) / 10,
-      roundTripHours: Math.round(oneWayHours * 2 * 10) / 10,
-      rudeness: rudenessScore(legs, options)
+      hours: Math.round(outbound.hours * 10) / 10,
+      roundTripHours: tripType === "oneway" ? null : Math.round((outbound.hours + returnHours) * 10) / 10,
+      rudeness: rudenessScore(outboundLegs, options)
+    };
+  }
+
+  // A loop: start -> stop 1 -> stop 2 -> ... -> back to start. Every hop is
+  // a real mode-aware leg between two real targets, closed by one final hop
+  // back to the start — "figure of 8" in spirit, a simple closed circuit in
+  // practice (still driven entirely by real distances).
+  function buildLoopRoute(startName, targets, startLat, startLon, opts = {}, weatherLine = null) {
+    const options = normalizeModeOpts(opts);
+    const stages = [];
+    const from = startName || "your current position";
+    const hasCoords = typeof startLat === "number" && typeof startLon === "number";
+
+    if (weatherLine) stages.push(weatherLine);
+    stages.push(`Leave ${from} on a loop through ${targets.length} stop${targets.length === 1 ? "" : "s"}`);
+
+    let totalH = 0;
+    let cLat = startLat, cLon = startLon;
+    const legsAll = [];
+    targets.forEach((t, i) => {
+      const km = hasCoords ? haversineKm(cLat, cLon, t.lat, t.lon) : 0;
+      const legs = hasCoords ? planLegs(km, options, i % 2) : [{ mode: "car", km: 0, label: "" }];
+      const { lines, hours } = describeLegSet(legs, options, t.loc);
+      stages.push(...lines);
+      stages.push(`Stop ${i + 1}: ${t.name} — poke around, take a photo, pretend you planned this`);
+      totalH += hours;
+      legsAll.push(...legs);
+      cLat = t.lat; cLon = t.lon;
+    });
+
+    stages.push(`Somewhere along the way, stop at ${pick(FUNNY_HUBS)} to ask for directions (they will be confidently wrong)`);
+
+    const closingKm = hasCoords ? haversineKm(cLat, cLon, startLat, startLon) : 0;
+    const closingLegs = hasCoords ? planLegs(closingKm, options, targets.length % 2) : [{ mode: "car", km: 0, label: "" }];
+    const closing = describeLegSet(closingLegs, options, from);
+    stages.push(`Close the loop back to ${from}:`);
+    stages.push(...closing.lines);
+    totalH += closing.hours;
+    legsAll.push(...closingLegs);
+
+    stages.push(`Arrive back where you started, having somehow visited ${targets.length} real place${targets.length === 1 ? "" : "s"} and explained none of it to anyone`);
+
+    return {
+      stages,
+      hours: Math.round(totalH * 10) / 10,
+      roundTripHours: Math.round(totalH * 10) / 10,
+      rudeness: rudenessScore(legsAll, options)
     };
   }
 
@@ -535,9 +657,11 @@ let lastOverpassCall = 0;
   // Public API
   global.TripSearchEngine = {
     fetchRandomTarget,
+    fetchRandomTargets,
     fetchNewsTarget,
     fetchWikipediaThumbnail,
     buildFunnyRoute,
+    buildLoopRoute,
     rudenessBadge,
     haversineKm,
     pick,
