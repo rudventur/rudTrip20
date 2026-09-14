@@ -90,6 +90,25 @@ let lastOverpassCall = 0;
       ],
       past: [["historic", ".*"]],
       future: [["building", "construction"], ["landuse", "construction"]]
+    },
+    // The three modes below don't really have a Present/Past/Future shape
+    // (a mountain has no "future" state) — only "present" is defined, and
+    // tagsFor() falls back to it for any secondary filter.
+    historical: {
+      present: [["historic", ".*"]]
+    },
+    geographical: {
+      present: [
+        ["natural", "peak|volcano|glacier|cliff|arch|cave_entrance|geyser|hot_spring|cape|bay|strait|spring|sinkhole|dune|reef|waterfall"],
+        ["place", "island"]
+      ]
+    },
+    gems: {
+      present: [
+        ["tourism", "viewpoint"],
+        ["natural", "cave_entrance|sinkhole|arch|rock|stone"],
+        ["historic", "wayside_cross|wayside_shrine"]
+      ]
     }
   };
 
@@ -280,6 +299,103 @@ let lastOverpassCall = 0;
       };
     } catch (err) {
       console.warn("News fallback unavailable:", err && err.message);
+      return null;
+    }
+  }
+
+  // ---------- "Viral" mode ----------
+  // Neither OSM nor GDELT has any notion of virality, so rather than fake
+  // one, this is wired to a real live signal: Wikipedia's own trending-
+  // pageviews feed (free, keyless, CORS-open), filtered down to whichever
+  // trending articles actually have a map location. Most trending topics on
+  // a given day are people/events with no fixed place — that's an honest
+  // "no luck" here, not a bug to paper over.
+  const WIKI_TIMEOUT_MS = 10000;
+  const WIKI_TRENDING_EXCLUDE = /^(Main_Page|Special:|Wikipedia:|Portal:|File:|Category:|Talk:|User:)/i;
+
+  function pageviewsDateParts(daysAgo) {
+    const d = new Date(Date.now() - daysAgo * 86400000);
+    return {
+      y: d.getUTCFullYear(),
+      m: String(d.getUTCMonth() + 1).padStart(2, "0"),
+      day: String(d.getUTCDate()).padStart(2, "0")
+    };
+  }
+
+  // The pageviews API usually lags a day or two behind "now", so this tries
+  // progressively older dates instead of assuming yesterday always exists.
+  async function fetchTrendingTitles() {
+    for (const daysAgo of [1, 2, 3]) {
+      const { y, m, day } = pageviewsDateParts(daysAgo);
+      try {
+        const url = `https://wikimedia.org/api/rest_v1/metrics/pageviews/top/en.wikipedia/all-access/${y}/${m}/${day}`;
+        const data = await fetchJson(url, {}, WIKI_TIMEOUT_MS);
+        const articles = (data.items && data.items[0] && data.items[0].articles) || [];
+        const titles = articles
+          .filter(a => a.article && !WIKI_TRENDING_EXCLUDE.test(a.article))
+          .slice(0, 60)
+          .map(a => ({ title: a.article, rank: a.rank }));
+        if (titles.length) return titles;
+      } catch (e) {
+        console.warn("Wikipedia pageviews unavailable for", y, m, day, e && e.message);
+      }
+    }
+    return [];
+  }
+
+  // Batch-looks-up coordinates (+ a blurb + thumbnail) for a set of trending
+  // titles in one request, keeping only the ones that resolve to a real
+  // place — a trending person or event with no fixed location just drops
+  // out here rather than getting a fabricated pin.
+  async function fetchCoordsForTitles(titles) {
+    const rankByTitle = new Map(titles.map(t => [t.title.replace(/_/g, " "), t.rank]));
+    const batch = titles.slice(0, 50).map(t => t.title).join("|");
+    const url = `https://en.wikipedia.org/w/api.php?action=query&format=json&origin=*&redirects=1&prop=coordinates|pageimages|extracts&exintro=1&explaintext=1&exchars=200&piprop=thumbnail&pithumbsize=500&titles=${encodeURIComponent(batch)}`;
+    const data = await fetchJson(url, {}, WIKI_TIMEOUT_MS);
+    const pages = (data.query && data.query.pages) || {};
+
+    const results = [];
+    for (const page of Object.values(pages)) {
+      if (!page.coordinates || !page.coordinates.length) continue;
+      const coord = page.coordinates[0];
+      results.push({
+        name: page.title,
+        extract: page.extract || "",
+        lat: coord.lat,
+        lon: coord.lon,
+        link: `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`,
+        photoUrl: page.thumbnail ? page.thumbnail.source : null,
+        rank: rankByTitle.get(page.title) || null
+      });
+    }
+    return results;
+  }
+
+  async function fetchViralTarget(onStatus) {
+    const say = m => { if (onStatus) onStatus(m); };
+    try {
+      say("Checking what's trending on Wikipedia…");
+      const titles = await fetchTrendingTitles();
+      if (!titles.length) return null;
+
+      say("Finding trending topics that actually have a place…");
+      const withCoords = await fetchCoordsForTitles(titles);
+      if (!withCoords.length) return null;
+
+      const pick = withCoords[Math.floor(Math.random() * withCoords.length)];
+      const rankLabel = pick.rank ? ` (#${pick.rank} today)` : "";
+      return {
+        name: pick.name,
+        loc: pick.name,
+        lat: pick.lat,
+        lon: pick.lon,
+        desc: `Trending on Wikipedia${rankLabel}${pick.extract ? " · " + pick.extract : ""}`,
+        link: pick.link,
+        photoUrl: pick.photoUrl,
+        source: "viral"
+      };
+    } catch (err) {
+      console.warn("Viral/trending fallback unavailable:", err && err.message);
       return null;
     }
   }
@@ -659,6 +775,7 @@ let lastOverpassCall = 0;
     fetchRandomTarget,
     fetchRandomTargets,
     fetchNewsTarget,
+    fetchViralTarget,
     fetchWikipediaThumbnail,
     buildFunnyRoute,
     buildLoopRoute,

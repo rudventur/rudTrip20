@@ -350,6 +350,10 @@
       <button class="lucky-btn" data-lucky="event">Lucky Event</button>
       <button class="lucky-btn" data-lucky="both">Good Trip</button>
       <button class="lucky-btn" data-lucky="news">📰 News</button>
+      <button class="lucky-btn" data-lucky="historical">🏛️ Historical</button>
+      <button class="lucky-btn" data-lucky="geographical">🏔️ Geographical</button>
+      <button class="lucky-btn" data-lucky="gems">💎 Topo & Gems</button>
+      <button class="lucky-btn" data-lucky="viral">📈 Viral</button>
     </div>
 
     <!-- Secondary filters -->
@@ -979,7 +983,7 @@
       document.getElementById("modeTag").textContent =
         luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
         (TRIP_TYPE_LABEL[tripType] || tripType.toUpperCase()) + " • " + getTimeWindow() +
-        " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
+        " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "viral" ? "Wikipedia trending" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
 
       // Result map
       if (resultMap) resultMap.remove();
@@ -1002,6 +1006,10 @@
 
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+      // #result is display:none until the line above, so Leaflet measured a
+      // 0×0 container when the map was created — without this it renders as
+      // a blank/half-loaded tile grid until the window happens to resize.
+      requestAnimationFrame(() => requestAnimationFrame(() => resultMap.invalidateSize()));
     }
 
     // Renders a full loop result — primary stop's card (as the "Lucky
@@ -1045,6 +1053,7 @@
 
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+      requestAnimationFrame(() => requestAnimationFrame(() => resultMap.invalidateSize()));
     }
 
     // ========== MAIN ==========
@@ -1052,10 +1061,12 @@
       const goBtn = document.getElementById("go");
       const startText = document.getElementById("start").value.trim();
 
-      // News mode doesn't depend on the visible map area at all, so it skips
-      // the start-point/GPS gate below — it's meant to be the fast, always-
-      // available option.
-      if (luckyMode !== "news" && !mapInteracted && !startLatLon) {
+      // News and Viral don't depend on the visible map area at all (Viral
+      // pulls from Wikipedia's global trending feed, not this view), so
+      // both skip the start-point/GPS gate below — they're meant to be the
+      // fast, always-available options.
+      const isDirectMode = luckyMode === "news" || luckyMode === "viral";
+      if (!isDirectMode && !mapInteracted && !startLatLon) {
         goBtn.disabled = true;
         goBtn.textContent = "Locating…";
         setStatus("Locating you (silent GPS fix)…");
@@ -1074,7 +1085,7 @@
 
       goBtn.disabled = true;
       const originalLabel = goBtn.textContent;
-      goBtn.textContent = luckyMode === "news" ? "Fetching a real headline…" : "Searching real places…";
+      goBtn.textContent = luckyMode === "news" ? "Fetching a real headline…" : luckyMode === "viral" ? "Checking what's trending…" : "Searching real places…";
       document.getElementById("result").classList.remove("visible");
       setStatus("Starting live search…");
 
@@ -1089,17 +1100,21 @@
         if (tripType === "loop") {
           const stops = Math.max(2, Math.min(5, parseInt(document.getElementById("loopStops").value, 10) || 3));
 
-          // News mode has no concept of "a pool of nearby real places" to
-          // sample from, so a loop in news mode just gets a single stop.
+          // News and Viral have no concept of "a pool of nearby real places"
+          // to sample from, so a loop in either mode just gets a single stop.
           const found = luckyMode === "news"
             ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { targets: [t], widened: false } : null)
+            : luckyMode === "viral"
+            ? await TripSearchEngine.fetchViralTarget(setStatus).then(t => t ? { targets: [t], widened: false } : null)
             : await TripSearchEngine.fetchRandomTargets(mainMap, luckyMode, secFilter, keyword, stops, setStatus);
 
           if (!found || !found.targets || found.targets.length === 0) {
             setStatus("");
             showPlainMessage(
               "No luck this time",
-              "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
+              luckyMode === "viral"
+                ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
+                : "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
             );
             return;
           }
@@ -1108,11 +1123,13 @@
           return;
         }
 
-        // News mode skips fetchRandomTarget (and Overpass) entirely — it's
-        // a direct, fast path straight to a live headline placed on the map.
-        // Both paths stream progress back through setStatus.
+        // News and Viral skip fetchRandomTarget (and Overpass) entirely —
+        // they're direct, fast paths straight to a live headline or a
+        // trending place. All paths stream progress back through setStatus.
         const found = luckyMode === "news"
           ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { target: t, widened: false } : null)
+          : luckyMode === "viral"
+          ? await TripSearchEngine.fetchViralTarget(setStatus).then(t => t ? { target: t, widened: false } : null)
           : await TripSearchEngine.fetchRandomTarget(mainMap, luckyMode, secFilter, keyword, setStatus);
 
         if (!found) {
@@ -1121,6 +1138,8 @@
             "No luck this time",
             luckyMode === "news"
               ? "Couldn't get a live headline just now (the free news API may be busy). Try again in a few seconds."
+              : luckyMode === "viral"
+              ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
               : "No matching real places turned up nearby, and the live news fallback came up empty too. Try a different area, mode or filter."
           );
           return;
