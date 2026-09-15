@@ -91,15 +91,39 @@ let lastOverpassCall = 0;
       past: [["historic", ".*"]],
       future: [["building", "construction"], ["landuse", "construction"]]
     }
+    // Further modes (historical/geographical/gems/...) are registered by
+    // extension files like modes-extra.js via registerCategoryTags(),
+    // rather than hardcoded here — this engine only owns Place/Event/Good
+    // Trip, plus the generic machinery every mode reuses.
   };
+
+  // A mode's present/past/future entry is either a flat tag-pair array
+  // (the original shape) or { mixes: [ [...tag pairs...], [...], ... ] } —
+  // a set of alternate tag combinations to keep the same mode from always
+  // searching for exactly the same thing. One mix is picked at random per
+  // search.
+  function resolveTagSet(entry) {
+    if (!entry) return null;
+    if (Array.isArray(entry)) return entry;
+    if (entry.mixes && entry.mixes.length) return pick(entry.mixes);
+    return null;
+  }
 
   function tagsFor(mode, sec) {
     if (mode === "both") {
-      return [...(CATEGORY_TAGS.place[sec] || CATEGORY_TAGS.place.present),
-              ...(CATEGORY_TAGS.event[sec] || CATEGORY_TAGS.event.present)];
+      return [...(resolveTagSet(CATEGORY_TAGS.place[sec]) || resolveTagSet(CATEGORY_TAGS.place.present)),
+              ...(resolveTagSet(CATEGORY_TAGS.event[sec]) || resolveTagSet(CATEGORY_TAGS.event.present))];
     }
     const table = CATEGORY_TAGS[mode] || CATEGORY_TAGS.place;
-    return table[sec] || table.present;
+    return resolveTagSet(table[sec]) || resolveTagSet(table.present);
+  }
+
+  // Lets an extension file (e.g. modes-extra.js) add a new lucky-mode
+  // without touching this file — same tag-pair/mixes shape as the built-in
+  // modes above, picked up automatically by tagsFor() and therefore by
+  // fetchRandomTarget/fetchRandomTargets.
+  function registerCategoryTags(name, def) {
+    CATEGORY_TAGS[name] = def;
   }
 
   function escapeForQuotedRegex(s) {
@@ -283,6 +307,11 @@ let lastOverpassCall = 0;
       return null;
     }
   }
+
+  // "Viral" and any other non-OSM-tag modes live in extension files (see
+  // modes-extra.js), which call registerCategoryTags() for tag-based modes
+  // and attach their own fetch-a-target function (e.g. fetchViralTarget)
+  // directly onto TripSearchEngine — this engine doesn't know about them.
 
   // ---------- Main ----------
   async function fetchRandomTarget(map, mode, sec, keyword, onStatus) {
@@ -665,6 +694,9 @@ let lastOverpassCall = 0;
     rudenessBadge,
     haversineKm,
     pick,
-    KEYWORD_IDEAS
+    KEYWORD_IDEAS,
+    // Extension points for files like modes-extra.js:
+    registerCategoryTags,
+    fetchJson
   };
 })(window);

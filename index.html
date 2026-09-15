@@ -219,6 +219,95 @@
     .rvu-modal-actions button { padding: 8px 16px; border-radius: 8px; border: none; font-size: 0.82rem; font-weight: 600; cursor: pointer; }
     .rvu-modal-actions .rvu-primary { background: var(--accent2); color: #111; }
     .rvu-modal-actions .rvu-secondary { background: var(--bg); color: var(--text); border: 1px solid var(--border) !important; }
+
+    /* Living Trip Board (day squares + tickable option boxes) */
+    #ltbSection { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 14px; margin-bottom: 16px; }
+    #ltbSection summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #ltbSection summary::-webkit-details-marker { display: none; }
+    #ltbSection summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
+    .ltb-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
+    .ltb-toolbar button {
+      padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border);
+      background: var(--bg); color: var(--text); font-weight: 600; font-size: 0.8rem; cursor: pointer;
+    }
+    .ltb-toolbar button:hover:not(:disabled) { border-color: var(--accent2); }
+    .ltb-toolbar button.ltb-danger { color: #ff8577; }
+    .ltb-toolbar button.ltb-danger:hover:not(:disabled) { border-color: #ff6b35; }
+    .ltb-toolbar button:disabled { opacity: 0.4; cursor: not-allowed; }
+    .ltb-status { font-size: 0.76rem; color: var(--muted); margin-left: auto; }
+    .ltb-live-note {
+      font-size: 0.7rem; color: var(--muted); background: var(--bg); border: 1px dashed var(--border);
+      border-radius: 8px; padding: 6px 10px; margin-bottom: 10px;
+    }
+    .ltb-layout { display: flex; gap: 12px; align-items: flex-start; }
+    .ltb-palette {
+      width: 190px; flex-shrink: 0; background: var(--bg); border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px; max-height: 600px; overflow-y: auto;
+    }
+    .ltb-palette-cat { font-size: 0.66rem; text-transform: uppercase; letter-spacing: 0.5px; font-weight: 700; margin: 10px 0 6px; }
+    .ltb-palette-cat:first-child { margin-top: 0; }
+    .ltb-palette-item {
+      display: flex; align-items: center; gap: 5px; padding: 5px 7px; margin-bottom: 5px;
+      border: 1px dashed var(--border); border-radius: 7px; font-size: 0.72rem; cursor: pointer;
+      background: var(--card);
+    }
+    .ltb-palette-item:hover { border-color: var(--accent2); }
+    .ltb-scroll { overflow-x: auto; border-radius: 10px; flex: 1; }
+    .ltb-board {
+      position: relative; width: 100%; min-width: 640px; height: 600px;
+      background:
+        linear-gradient(90deg, var(--border) 1px, transparent 1px),
+        linear-gradient(var(--border) 1px, transparent 1px);
+      background-size: 32px 32px;
+      background-color: var(--bg);
+      border: 1px solid var(--border); border-radius: 10px;
+      overflow: hidden;
+    }
+    .ltb-day {
+      position: absolute; background: var(--card); border: 2px solid var(--border); border-radius: 10px;
+      display: flex; flex-direction: column; min-width: 200px; min-height: 160px;
+      transition: box-shadow 0.15s, border-color 0.15s; box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+      animation: ltb-float 6s ease-in-out infinite; will-change: transform;
+    }
+    .ltb-day.ltb-selected { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(0,212,255,0.3), 0 6px 16px rgba(0,0,0,0.3); }
+    /* Idle: a slow, gentle bob — each card's animation-delay/-duration are
+       set per-instance in JS so a room full of days doesn't breathe in
+       sync. Dragging: real physical tilt driven by horizontal drag speed
+       (JS sets transform directly), so the animation gets out of the way. */
+    @keyframes ltb-float {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-4px) rotate(0.6deg); }
+    }
+    .ltb-day.ltb-dragging {
+      animation: none; transition: none; cursor: grabbing;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+    }
+    .ltb-day-header {
+      cursor: move; padding: 8px 10px 6px; border-bottom: 1px solid var(--border);
+      font-weight: 800; font-size: 0.85rem; outline: none;
+    }
+    .ltb-day-header[contenteditable="true"]:focus { color: var(--accent2); }
+    .ltb-day-body { flex: 1; padding: 8px; display: flex; flex-wrap: wrap; align-content: flex-start; gap: 6px; overflow: auto; }
+    .ltb-optbox {
+      position: relative; display: flex; align-items: center; gap: 5px; padding: 6px 8px;
+      border-radius: 7px; border-width: 1.5px; border-style: solid; font-size: 0.72rem;
+      cursor: pointer; background: var(--bg); max-width: 100%;
+    }
+    .ltb-optbox .ltb-lock { display: none; align-items: center; }
+    .ltb-optbox.ltb-ticked .ltb-lock { display: flex; }
+    .ltb-optbox-x {
+      position: absolute; top: -6px; right: -6px; width: 15px; height: 15px; border-radius: 50%;
+      background: var(--card); border: 1px solid var(--border); color: var(--muted); font-size: 10px;
+      display: none; align-items: center; justify-content: center; cursor: pointer; line-height: 1;
+    }
+    .ltb-optbox:hover .ltb-optbox-x { display: flex; }
+    .ltb-resize-handle {
+      position: absolute; width: 14px; height: 14px; right: -7px; bottom: -7px;
+      background: var(--accent2); border: 2px solid var(--card); border-radius: 50%;
+      cursor: nwse-resize; z-index: 30; opacity: 0; transition: opacity 0.15s;
+    }
+    .ltb-day.ltb-selected .ltb-resize-handle, .ltb-day:hover .ltb-resize-handle { opacity: 1; }
+    .ltb-hint { font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
   </style>
 </head>
 <body>
@@ -250,12 +339,34 @@
       <p class="rvu-hint">Drag boxes to move • drag the cyan dot to resize (stays square) • double-click a box to rename or link it • the ↗ badge opens its link.</p>
     </details>
 
+    <!-- Living Trip Board: day squares holding tickable option boxes -->
+    <details id="ltbSection">
+      <summary>🧿 Living Trip Board <span class="wt-toggle">tap to expand</span></summary>
+      <p class="ltb-live-note">📡 Live channel (multiple people editing the same board at once) needs a real backend — not wired up yet. Everything here is saved to this browser only.</p>
+      <div class="ltb-toolbar">
+        <button id="ltbAddDay">＋ Add day</button>
+        <button id="ltbDeleteDay" class="ltb-danger" disabled>Delete day</button>
+        <span class="ltb-status" id="ltbStatus">Click a day to select it</span>
+      </div>
+      <div class="ltb-layout">
+        <div class="ltb-palette" id="ltbPalette"></div>
+        <div class="ltb-scroll">
+          <div class="ltb-board" id="ltbBoard"></div>
+        </div>
+      </div>
+      <p class="ltb-hint">Drag a day square by its title to move it, drag the cyan dot to resize, double-click the title to rename • select a day, then click a palette box to drop a copy in • click an option box to tick it (it glows and locks) • hover a box for the × to remove it.</p>
+    </details>
+
     <!-- Main Lucky modes -->
     <div class="lucky-row">
       <button class="lucky-btn active" data-lucky="place">Lucky Place</button>
       <button class="lucky-btn" data-lucky="event">Lucky Event</button>
       <button class="lucky-btn" data-lucky="both">Good Trip</button>
       <button class="lucky-btn" data-lucky="news">📰 News</button>
+      <button class="lucky-btn" data-lucky="historical">🏛️ Historical</button>
+      <button class="lucky-btn" data-lucky="geographical">🏔️ Geographical</button>
+      <button class="lucky-btn" data-lucky="gems">💎 Topo & Gems</button>
+      <button class="lucky-btn" data-lucky="viral">📈 Viral</button>
     </div>
 
     <!-- Secondary filters -->
@@ -388,6 +499,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="search-engine.js"></script>
+  <script src="modes-extra.js"></script>
   <script>
     // ---- Live weather ticker (independent of the Lucky search engine) ----
     // Renders RudVentur's "Weather News" RSS.app feed — real, live headlines,
@@ -535,13 +647,15 @@
     // ---- Startup guard: if a dependency is missing (wrong filename, blocked
     // CDN, opened as file:// ...) fail LOUDLY on the button instead of
     // silently doing nothing. ----
-    if (typeof L === "undefined" || typeof TripSearchEngine === "undefined") {
+    if (typeof L === "undefined" || typeof TripSearchEngine === "undefined" || typeof TripSearchEngine.fetchViralTarget !== "function") {
       const goBtn = document.getElementById("go");
       goBtn.disabled = true;
       goBtn.textContent = typeof TripSearchEngine === "undefined"
         ? "search-engine.js not loaded (check filename & folder)"
+        : typeof TripSearchEngine.fetchViralTarget !== "function"
+        ? "modes-extra.js not loaded (check filename & folder)"
         : "Map library blocked (check connection / ad-blocker)";
-      console.error("Startup failed — L:", typeof L, "| TripSearchEngine:", typeof TripSearchEngine);
+      console.error("Startup failed — L:", typeof L, "| TripSearchEngine:", typeof TripSearchEngine, "| modes-extra:", typeof TripSearchEngine !== "undefined" && typeof TripSearchEngine.fetchViralTarget);
       throw new Error("Missing dependency — see the button for details");
     }
 
@@ -885,7 +999,7 @@
       document.getElementById("modeTag").textContent =
         luckyMode.toUpperCase() + " • " + secFilter.toUpperCase() + " • " +
         (TRIP_TYPE_LABEL[tripType] || tripType.toUpperCase()) + " • " + getTimeWindow() +
-        " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
+        " • via " + (target.source === "news" ? "live news (GDELT)" : target.source === "viral" ? "Wikipedia trending" : target.source === "wikidata" ? "Wikidata" : "OpenStreetMap");
 
       // Result map
       if (resultMap) resultMap.remove();
@@ -908,6 +1022,10 @@
 
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+      // #result is display:none until the line above, so Leaflet measured a
+      // 0×0 container when the map was created — without this it renders as
+      // a blank/half-loaded tile grid until the window happens to resize.
+      requestAnimationFrame(() => requestAnimationFrame(() => resultMap.invalidateSize()));
     }
 
     // Renders a full loop result — primary stop's card (as the "Lucky
@@ -951,6 +1069,7 @@
 
       document.getElementById("result").classList.add("visible");
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
+      requestAnimationFrame(() => requestAnimationFrame(() => resultMap.invalidateSize()));
     }
 
     // ========== MAIN ==========
@@ -958,10 +1077,12 @@
       const goBtn = document.getElementById("go");
       const startText = document.getElementById("start").value.trim();
 
-      // News mode doesn't depend on the visible map area at all, so it skips
-      // the start-point/GPS gate below — it's meant to be the fast, always-
-      // available option.
-      if (luckyMode !== "news" && !mapInteracted && !startLatLon) {
+      // News and Viral don't depend on the visible map area at all (Viral
+      // pulls from Wikipedia's global trending feed, not this view), so
+      // both skip the start-point/GPS gate below — they're meant to be the
+      // fast, always-available options.
+      const isDirectMode = luckyMode === "news" || luckyMode === "viral";
+      if (!isDirectMode && !mapInteracted && !startLatLon) {
         goBtn.disabled = true;
         goBtn.textContent = "Locating…";
         setStatus("Locating you (silent GPS fix)…");
@@ -980,7 +1101,7 @@
 
       goBtn.disabled = true;
       const originalLabel = goBtn.textContent;
-      goBtn.textContent = luckyMode === "news" ? "Fetching a real headline…" : "Searching real places…";
+      goBtn.textContent = luckyMode === "news" ? "Fetching a real headline…" : luckyMode === "viral" ? "Checking what's trending…" : "Searching real places…";
       document.getElementById("result").classList.remove("visible");
       setStatus("Starting live search…");
 
@@ -995,17 +1116,21 @@
         if (tripType === "loop") {
           const stops = Math.max(2, Math.min(5, parseInt(document.getElementById("loopStops").value, 10) || 3));
 
-          // News mode has no concept of "a pool of nearby real places" to
-          // sample from, so a loop in news mode just gets a single stop.
+          // News and Viral have no concept of "a pool of nearby real places"
+          // to sample from, so a loop in either mode just gets a single stop.
           const found = luckyMode === "news"
             ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { targets: [t], widened: false } : null)
+            : luckyMode === "viral"
+            ? await TripSearchEngine.fetchViralTarget(setStatus).then(t => t ? { targets: [t], widened: false } : null)
             : await TripSearchEngine.fetchRandomTargets(mainMap, luckyMode, secFilter, keyword, stops, setStatus);
 
           if (!found || !found.targets || found.targets.length === 0) {
             setStatus("");
             showPlainMessage(
               "No luck this time",
-              "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
+              luckyMode === "viral"
+                ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
+                : "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
             );
             return;
           }
@@ -1014,11 +1139,13 @@
           return;
         }
 
-        // News mode skips fetchRandomTarget (and Overpass) entirely — it's
-        // a direct, fast path straight to a live headline placed on the map.
-        // Both paths stream progress back through setStatus.
+        // News and Viral skip fetchRandomTarget (and Overpass) entirely —
+        // they're direct, fast paths straight to a live headline or a
+        // trending place. All paths stream progress back through setStatus.
         const found = luckyMode === "news"
           ? await TripSearchEngine.fetchNewsTarget(keyword, setStatus).then(t => t ? { target: t, widened: false } : null)
+          : luckyMode === "viral"
+          ? await TripSearchEngine.fetchViralTarget(setStatus).then(t => t ? { target: t, widened: false } : null)
           : await TripSearchEngine.fetchRandomTarget(mainMap, luckyMode, secFilter, keyword, setStatus);
 
         if (!found) {
@@ -1027,6 +1154,8 @@
             "No luck this time",
             luckyMode === "news"
               ? "Couldn't get a live headline just now (the free news API may be busy). Try again in a few seconds."
+              : luckyMode === "viral"
+              ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
               : "No matching real places turned up nearby, and the live news fallback came up empty too. Try a different area, mode or filter."
           );
           return;
@@ -1414,6 +1543,390 @@
         if (e.key === 'Escape') btnCancel.click();
       });
 
+      render();
+    })();
+  </script>
+
+  <script>
+    // ---- Living Trip Board: day squares holding tickable option boxes ----
+    // Self-contained (own state, own element ids, own "ltb" prefix) so it
+    // can't collide with the Lucky search engine or the Universe map above.
+    // Saved to localStorage so it survives a reload — unlike the Universe
+    // map, this one is meant to be lived in, not just played with — but
+    // it's still single-browser only: the "live channel" / multiplayer part
+    // of the vision needs a real backend (Firebase or similar) that hasn't
+    // been wired up, so it's left as an honest static note in the UI above
+    // rather than faked.
+    (function () {
+      const STORAGE_KEY = "rudventur_ltb_v1";
+
+      const PALETTE = [
+        { cat: "reality", icon: "📍", label: "Place" },
+        { cat: "reality", icon: "🧍", label: "Crew" },
+        { cat: "reality", icon: "🚗", label: "Vehicle" },
+        { cat: "reality", icon: "💰", label: "Budget" },
+        { cat: "reality", icon: "🛏️", label: "Sleep" },
+        { cat: "reality", icon: "🍽️", label: "Food ritual" },
+        { cat: "reality", icon: "⏰", label: "Time anchor" },
+        { cat: "chaos", icon: "🌀", label: "Mood weather" },
+        { cat: "chaos", icon: "🎲", label: "Random event" },
+        { cat: "chaos", icon: "🦋", label: "Butterfly effect" },
+        { cat: "chaos", icon: "🕳️", label: "Plot hole" },
+        { cat: "chaos", icon: "⚡", label: "Spontaneous detour" },
+        { cat: "chaos", icon: "🧠", label: "Shared hallucination" },
+        { cat: "chaos", icon: "🧿", label: "Feels cursed / blessed" },
+        { cat: "meta", icon: "📡", label: "Live channel" },
+        { cat: "meta", icon: "🔗", label: "Shared mind" },
+        { cat: "meta", icon: "🪞", label: "Mirror box" },
+        { cat: "meta", icon: "⏳", label: "Timeline fracture" },
+        { cat: "meta", icon: "🧬", label: "Mutation" },
+        { cat: "ritual", icon: "🔥", label: "Offering" },
+        { cat: "ritual", icon: "🌑", label: "Shadow passenger" },
+        { cat: "ritual", icon: "🗺️", label: "Unmapped zone" },
+        { cat: "ritual", icon: "🃏", label: "Wildcard" },
+        { cat: "ritual", icon: "📜", label: "Prophecy" },
+        { cat: "ritual", icon: "🩸", label: "Blood oath" }
+      ];
+      const CAT_LABEL = { reality: "Reality", chaos: "Chaos / energy", meta: "Meta / live", ritual: "Ritual / weird" };
+      const CAT_COLOR = { reality: "#00d4ff", chaos: "#ff6b35", meta: "#b98bff", ritual: "#ff8577" };
+
+      function defaultDays() {
+        return [
+          {
+            id: 1, title: "Day 1", x: 20, y: 20, w: 260, h: 220, z: 1,
+            boxes: [
+              { id: 1, cat: "reality", icon: "📍", label: "Place", ticked: true },
+              { id: 2, cat: "reality", icon: "⏰", label: "Time anchor", ticked: true },
+              { id: 3, cat: "chaos", icon: "🌀", label: "Mood weather", ticked: false }
+            ]
+          }
+        ];
+      }
+
+      function loadState() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return null;
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed.days)) return parsed;
+        } catch {
+          // ignore corrupt/unavailable storage — fall back to defaults
+        }
+        return null;
+      }
+
+      function saveState() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ days, nextDayId, nextBoxId }));
+        } catch {
+          // private-browsing / storage-full — the board still works this session
+        }
+      }
+
+      const initial = loadState();
+      let days = initial ? initial.days : defaultDays();
+      let nextDayId = initial ? initial.nextDayId : 2;
+      let nextBoxId = initial ? initial.nextBoxId : 4;
+      let nextZ = Math.max(1, ...days.map(d => d.z || 1)) + 1;
+      let selectedDayId = days.length ? days[0].id : null;
+      let isDragging = false, isResizing = false;
+      let dragOffsetX = 0, dragOffsetY = 0;
+      let dragLastX = 0, dragTilt = 0;
+      let resizeStartW = 0, resizeStartH = 0, resizeStartX = 0, resizeStartY = 0;
+
+      const board = document.getElementById("ltbBoard");
+      const paletteEl = document.getElementById("ltbPalette");
+      const btnAddDay = document.getElementById("ltbAddDay");
+      const btnDeleteDay = document.getElementById("ltbDeleteDay");
+      const statusEl = document.getElementById("ltbStatus");
+
+      function renderPalette() {
+        paletteEl.innerHTML = "";
+        const cats = ["reality", "chaos", "meta", "ritual"];
+        cats.forEach(cat => {
+          const heading = document.createElement("div");
+          heading.className = "ltb-palette-cat";
+          heading.style.color = CAT_COLOR[cat];
+          heading.textContent = CAT_LABEL[cat];
+          paletteEl.appendChild(heading);
+          PALETTE.filter(p => p.cat === cat).forEach(p => {
+            const item = document.createElement("div");
+            item.className = "ltb-palette-item";
+            item.innerHTML = `<span>${p.icon}</span><span>${p.label}</span>`;
+            item.addEventListener("click", () => addBoxToSelectedDay(p));
+            paletteEl.appendChild(item);
+          });
+        });
+      }
+
+      function addBoxToSelectedDay(paletteItem) {
+        const day = days.find(d => d.id === selectedDayId);
+        if (!day) {
+          statusEl.textContent = "Select a day first, then click a palette box";
+          return;
+        }
+        day.boxes.push({ id: nextBoxId++, cat: paletteItem.cat, icon: paletteItem.icon, label: paletteItem.label, ticked: false });
+        saveState();
+        render();
+      }
+
+      function createOptBoxElement(day, box) {
+        const el = document.createElement("div");
+        el.className = "ltb-optbox" + (box.ticked ? " ltb-ticked" : "");
+        const color = CAT_COLOR[box.cat] || "var(--border)";
+        el.style.borderColor = box.ticked ? color : "var(--border)";
+        el.style.boxShadow = box.ticked ? `0 0 0 3px ${color}38` : "none";
+
+        const iconSpan = document.createElement("span");
+        iconSpan.textContent = box.icon;
+        const labelSpan = document.createElement("span");
+        labelSpan.textContent = box.label;
+        const lock = document.createElement("span");
+        lock.className = "ltb-lock";
+        lock.innerHTML = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="1.5"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>`;
+
+        el.appendChild(iconSpan);
+        el.appendChild(labelSpan);
+        el.appendChild(lock);
+
+        const del = document.createElement("div");
+        del.className = "ltb-optbox-x";
+        del.textContent = "×";
+        del.addEventListener("mousedown", e => e.stopPropagation());
+        del.addEventListener("click", e => {
+          e.stopPropagation();
+          day.boxes = day.boxes.filter(b => b.id !== box.id);
+          saveState();
+          render();
+        });
+        el.appendChild(del);
+
+        el.addEventListener("mousedown", e => e.stopPropagation());
+        el.addEventListener("click", e => {
+          e.stopPropagation();
+          box.ticked = !box.ticked;
+          saveState();
+          render();
+        });
+
+        return el;
+      }
+
+      function createDayElement(day) {
+        const el = document.createElement("div");
+        el.className = "ltb-day" + (day.id === selectedDayId ? " ltb-selected" : "");
+        el.dataset.id = day.id;
+        el.style.left = day.x + "px";
+        el.style.top = day.y + "px";
+        el.style.width = day.w + "px";
+        el.style.height = day.h + "px";
+        el.style.zIndex = day.z || 1;
+        // Offsets the idle float animation per card (keyed off its id, so
+        // it's stable across re-renders) — a room full of days shouldn't
+        // all bob in perfect unison.
+        el.style.animationDelay = ((day.id % 5) * 0.55) + "s";
+        el.style.animationDuration = (5 + (day.id % 4)) + "s";
+
+        const header = document.createElement("div");
+        header.className = "ltb-day-header";
+        header.textContent = day.title;
+        header.addEventListener("mousedown", startDrag);
+        header.addEventListener("dblclick", e => {
+          e.stopPropagation();
+          header.contentEditable = "true";
+          header.focus();
+          document.execCommand("selectAll", false, null);
+        });
+        header.addEventListener("blur", () => {
+          header.contentEditable = "false";
+          day.title = header.textContent.trim() || "Untitled day";
+          header.textContent = day.title;
+          saveState();
+        });
+        header.addEventListener("keydown", e => {
+          if (e.key === "Enter") { e.preventDefault(); header.blur(); }
+        });
+        el.appendChild(header);
+
+        const body = document.createElement("div");
+        body.className = "ltb-day-body";
+        day.boxes.forEach(box => body.appendChild(createOptBoxElement(day, box)));
+        el.appendChild(body);
+
+        const handle = document.createElement("div");
+        handle.className = "ltb-resize-handle";
+        handle.addEventListener("mousedown", startResize);
+        el.appendChild(handle);
+
+        el.addEventListener("mousedown", () => selectDay(day.id));
+
+        return el;
+      }
+
+      function render() {
+        board.innerHTML = "";
+        days.forEach(day => board.appendChild(createDayElement(day)));
+        updateToolbar();
+      }
+
+      function updateToolbar() {
+        const hasSelection = selectedDayId !== null && days.some(d => d.id === selectedDayId);
+        btnDeleteDay.disabled = !hasSelection;
+        const day = days.find(d => d.id === selectedDayId);
+        statusEl.textContent = hasSelection
+          ? `Selected: "${day.title}" — click a palette box to drop it in`
+          : "Click a day to select it";
+      }
+
+      function selectDay(id) {
+        if (id === selectedDayId) return;
+        selectedDayId = id;
+        const day = days.find(d => d.id === id);
+        if (day) day.z = nextZ++;
+        render();
+      }
+
+      board.addEventListener("mousedown", e => {
+        if (e.target === board) { selectedDayId = null; render(); }
+      });
+
+      function startDrag(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dayEl = e.currentTarget.closest(".ltb-day");
+        const id = parseInt(dayEl.dataset.id, 10);
+        selectDay(id);
+
+        const day = days.find(d => d.id === id);
+        const rect = board.getBoundingClientRect();
+        isDragging = true;
+        dragOffsetX = e.clientX - rect.left - day.x;
+        dragOffsetY = e.clientY - rect.top - day.y;
+        dragLastX = e.clientX;
+        dragTilt = 0;
+
+        // Swaps the idle float animation for a direct transform the drag
+        // physics below drive — like the card is a real object being
+        // dragged rather than just a repositioned div.
+        const dayElNow = board.querySelector(`[data-id="${id}"]`);
+        if (dayElNow) dayElNow.classList.add("ltb-dragging");
+
+        document.addEventListener("mousemove", onDrag);
+        document.addEventListener("mouseup", stopDrag);
+      }
+
+      function onDrag(e) {
+        if (!isDragging || selectedDayId === null) return;
+        const day = days.find(d => d.id === selectedDayId);
+        if (!day) return;
+
+        const rect = board.getBoundingClientRect();
+        day.x = Math.max(0, Math.min(rect.width - day.w, e.clientX - rect.left - dragOffsetX));
+        day.y = Math.max(0, Math.min(rect.height - day.h, e.clientY - rect.top - dragOffsetY));
+
+        // Tilt in the direction of horizontal motion, spring-damped so it
+        // doesn't jitter on every pixel of mouse noise — a shopping-cart
+        // wobble rather than a rigid snap.
+        const dx = e.clientX - dragLastX;
+        dragLastX = e.clientX;
+        const targetTilt = Math.max(-9, Math.min(9, dx * 1.4));
+        dragTilt += (targetTilt - dragTilt) * 0.5;
+
+        const el = board.querySelector(`[data-id="${selectedDayId}"]`);
+        if (el) {
+          el.style.left = day.x + "px";
+          el.style.top = day.y + "px";
+          el.style.transform = `rotate(${dragTilt.toFixed(2)}deg)`;
+        }
+      }
+
+      function stopDrag() {
+        if (isDragging) {
+          saveState();
+          const el = board.querySelector(`[data-id="${selectedDayId}"]`);
+          if (el) {
+            el.classList.remove("ltb-dragging");
+            // A little overshoot on the way back to level, then hand
+            // control back to the idle float animation.
+            el.style.transition = "transform 0.4s cubic-bezier(.34,1.56,.64,1)";
+            el.style.transform = "rotate(0deg)";
+            setTimeout(() => {
+              el.style.transition = "";
+              el.style.transform = "";
+            }, 400);
+          }
+        }
+        isDragging = false;
+        document.removeEventListener("mousemove", onDrag);
+        document.removeEventListener("mouseup", stopDrag);
+      }
+
+      function startResize(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const dayEl = e.target.closest(".ltb-day");
+        const id = parseInt(dayEl.dataset.id, 10);
+        selectDay(id);
+
+        const day = days.find(d => d.id === id);
+        isResizing = true;
+        resizeStartW = day.w;
+        resizeStartH = day.h;
+        resizeStartX = e.clientX;
+        resizeStartY = e.clientY;
+
+        document.addEventListener("mousemove", onResize);
+        document.addEventListener("mouseup", stopResize);
+      }
+
+      function onResize(e) {
+        if (!isResizing || selectedDayId === null) return;
+        const day = days.find(d => d.id === selectedDayId);
+        if (!day) return;
+
+        const rect = board.getBoundingClientRect();
+        const dx = e.clientX - resizeStartX;
+        const dy = e.clientY - resizeStartY;
+        day.w = Math.min(rect.width - day.x, Math.max(200, resizeStartW + dx));
+        day.h = Math.min(rect.height - day.y, Math.max(160, resizeStartH + dy));
+
+        const el = board.querySelector(`[data-id="${selectedDayId}"]`);
+        if (el) {
+          el.style.width = day.w + "px";
+          el.style.height = day.h + "px";
+        }
+      }
+
+      function stopResize() {
+        if (isResizing) saveState();
+        isResizing = false;
+        document.removeEventListener("mousemove", onResize);
+        document.removeEventListener("mouseup", stopResize);
+      }
+
+      btnAddDay.addEventListener("click", () => {
+        const newDay = {
+          id: nextDayId++,
+          title: `Day ${days.length + 1}`,
+          x: 20 + Math.random() * 200, y: 20 + Math.random() * 120,
+          w: 260, h: 220, z: nextZ++, boxes: []
+        };
+        days.push(newDay);
+        selectedDayId = newDay.id;
+        saveState();
+        render();
+      });
+
+      btnDeleteDay.addEventListener("click", () => {
+        if (selectedDayId === null) return;
+        if (!confirm("Delete this day and everything in it?")) return;
+        days = days.filter(d => d.id !== selectedDayId);
+        selectedDayId = null;
+        saveState();
+        render();
+      });
+
+      renderPalette();
       render();
     })();
   </script>
