@@ -486,6 +486,7 @@
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="search-engine.js"></script>
+  <script src="modes-extra.js"></script>
   <script>
     // ---- Live weather ticker (independent of the Lucky search engine) ----
     // Renders RudVentur's "Weather News" RSS.app feed — real, live headlines,
@@ -633,13 +634,15 @@
     // ---- Startup guard: if a dependency is missing (wrong filename, blocked
     // CDN, opened as file:// ...) fail LOUDLY on the button instead of
     // silently doing nothing. ----
-    if (typeof L === "undefined" || typeof TripSearchEngine === "undefined") {
+    if (typeof L === "undefined" || typeof TripSearchEngine === "undefined" || typeof TripSearchEngine.fetchViralTarget !== "function") {
       const goBtn = document.getElementById("go");
       goBtn.disabled = true;
       goBtn.textContent = typeof TripSearchEngine === "undefined"
         ? "search-engine.js not loaded (check filename & folder)"
+        : typeof TripSearchEngine.fetchViralTarget !== "function"
+        ? "modes-extra.js not loaded (check filename & folder)"
         : "Map library blocked (check connection / ad-blocker)";
-      console.error("Startup failed — L:", typeof L, "| TripSearchEngine:", typeof TripSearchEngine);
+      console.error("Startup failed — L:", typeof L, "| TripSearchEngine:", typeof TripSearchEngine, "| modes-extra:", typeof TripSearchEngine !== "undefined" && typeof TripSearchEngine.fetchViralTarget);
       throw new Error("Missing dependency — see the button for details");
     }
 
