@@ -267,8 +267,21 @@
       position: absolute; background: var(--card); border: 2px solid var(--border); border-radius: 10px;
       display: flex; flex-direction: column; min-width: 200px; min-height: 160px;
       transition: box-shadow 0.15s, border-color 0.15s; box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+      animation: ltb-float 6s ease-in-out infinite; will-change: transform;
     }
     .ltb-day.ltb-selected { border-color: var(--accent2); box-shadow: 0 0 0 3px rgba(0,212,255,0.3), 0 6px 16px rgba(0,0,0,0.3); }
+    /* Idle: a slow, gentle bob — each card's animation-delay/-duration are
+       set per-instance in JS so a room full of days doesn't breathe in
+       sync. Dragging: real physical tilt driven by horizontal drag speed
+       (JS sets transform directly), so the animation gets out of the way. */
+    @keyframes ltb-float {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50% { transform: translateY(-4px) rotate(0.6deg); }
+    }
+    .ltb-day.ltb-dragging {
+      animation: none; transition: none; cursor: grabbing;
+      box-shadow: 0 16px 32px rgba(0,0,0,0.5);
+    }
     .ltb-day-header {
       cursor: move; padding: 8px 10px 6px; border-bottom: 1px solid var(--border);
       font-weight: 800; font-size: 0.85rem; outline: none;
@@ -1618,6 +1631,7 @@
       let selectedDayId = days.length ? days[0].id : null;
       let isDragging = false, isResizing = false;
       let dragOffsetX = 0, dragOffsetY = 0;
+      let dragLastX = 0, dragTilt = 0;
       let resizeStartW = 0, resizeStartH = 0, resizeStartX = 0, resizeStartY = 0;
 
       const board = document.getElementById("ltbBoard");
@@ -1707,6 +1721,11 @@
         el.style.width = day.w + "px";
         el.style.height = day.h + "px";
         el.style.zIndex = day.z || 1;
+        // Offsets the idle float animation per card (keyed off its id, so
+        // it's stable across re-renders) — a room full of days shouldn't
+        // all bob in perfect unison.
+        el.style.animationDelay = ((day.id % 5) * 0.55) + "s";
+        el.style.animationDuration = (5 + (day.id % 4)) + "s";
 
         const header = document.createElement("div");
         header.className = "ltb-day-header";
@@ -1783,6 +1802,14 @@
         isDragging = true;
         dragOffsetX = e.clientX - rect.left - day.x;
         dragOffsetY = e.clientY - rect.top - day.y;
+        dragLastX = e.clientX;
+        dragTilt = 0;
+
+        // Swaps the idle float animation for a direct transform the drag
+        // physics below drive — like the card is a real object being
+        // dragged rather than just a repositioned div.
+        const dayElNow = board.querySelector(`[data-id="${id}"]`);
+        if (dayElNow) dayElNow.classList.add("ltb-dragging");
 
         document.addEventListener("mousemove", onDrag);
         document.addEventListener("mouseup", stopDrag);
@@ -1797,15 +1824,38 @@
         day.x = Math.max(0, Math.min(rect.width - day.w, e.clientX - rect.left - dragOffsetX));
         day.y = Math.max(0, Math.min(rect.height - day.h, e.clientY - rect.top - dragOffsetY));
 
+        // Tilt in the direction of horizontal motion, spring-damped so it
+        // doesn't jitter on every pixel of mouse noise — a shopping-cart
+        // wobble rather than a rigid snap.
+        const dx = e.clientX - dragLastX;
+        dragLastX = e.clientX;
+        const targetTilt = Math.max(-9, Math.min(9, dx * 1.4));
+        dragTilt += (targetTilt - dragTilt) * 0.5;
+
         const el = board.querySelector(`[data-id="${selectedDayId}"]`);
         if (el) {
           el.style.left = day.x + "px";
           el.style.top = day.y + "px";
+          el.style.transform = `rotate(${dragTilt.toFixed(2)}deg)`;
         }
       }
 
       function stopDrag() {
-        if (isDragging) saveState();
+        if (isDragging) {
+          saveState();
+          const el = board.querySelector(`[data-id="${selectedDayId}"]`);
+          if (el) {
+            el.classList.remove("ltb-dragging");
+            // A little overshoot on the way back to level, then hand
+            // control back to the idle float animation.
+            el.style.transition = "transform 0.4s cubic-bezier(.34,1.56,.64,1)";
+            el.style.transform = "rotate(0deg)";
+            setTimeout(() => {
+              el.style.transition = "";
+              el.style.transform = "";
+            }, 400);
+          }
+        }
         isDragging = false;
         document.removeEventListener("mousemove", onDrag);
         document.removeEventListener("mouseup", stopDrag);
