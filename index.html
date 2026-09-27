@@ -249,6 +249,7 @@
         <button id="rvuAdd">＋ Add box</button>
         <button id="rvuEdit" disabled>Edit</button>
         <button id="rvuDelete" class="rvu-danger" disabled>Delete</button>
+        <button id="rvuReset" title="Forget your saved layout and bring back the original boxes">↺ Reset to default</button>
         <span class="rvu-status" id="rvuStatus">Click a box to select</span>
       </div>
       <div class="rvu-scroll">
@@ -404,12 +405,21 @@
     // global scope) — sanitizes any externally-sourced URL (OSM tags, news
     // articles, this feed) before it goes into an href/src.
     function safeUrl(raw) {
+      // An empty value would otherwise resolve to this page's own address.
+      if (typeof raw !== "string" || !raw.trim()) return "";
       try {
         const u = new URL(raw, location.href);
         return (u.protocol === "http:" || u.protocol === "https:") ? u.href : "";
       } catch {
         return "";
       }
+    }
+
+    // Route stages and map popups mention place names, the start text and
+    // headlines, which can come from a share link or outside data — escape
+    // them so they always show as plain text, never as page markup.
+    function escapeHtml(text) {
+      return String(text).replace(/[&<>"']/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch]));
     }
 
     // Today's weather-headline "mood" — a lightweight keyword read of the
@@ -796,7 +806,7 @@
             <div class="route-title">${i === 0 ? "Direct option" : "Alternative option"}</div>
           </div>
           <div class="route-meta">${routeResult.hours}h one-way${routeResult.roundTripHours != null ? ` · ${routeResult.roundTripHours}h round trip` : ""} · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
-          <ul class="stages">${routeResult.stages.map(s => `<li>${s}</li>`).join("")}</ul>
+          <ul class="stages">${routeResult.stages.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
         `;
         routesEl.appendChild(div);
       }
@@ -819,7 +829,7 @@
           <div class="route-title">Loop route</div>
         </div>
         <div class="route-meta">${routeResult.hours}h total · ${TripSearchEngine.rudenessBadge(routeResult.rudeness)}</div>
-        <ul class="stages">${routeResult.stages.map(s => `<li>${s}</li>`).join("")}</ul>
+        <ul class="stages">${routeResult.stages.map(s => `<li>${escapeHtml(s)}</li>`).join("")}</ul>
       `;
       routesEl.appendChild(div);
       updateCountdown(routeResult, true);
@@ -901,7 +911,7 @@
         attribution: "© OpenStreetMap", maxZoom: 18
       }).addTo(resultMap);
       L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
-      L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(target.name);
+      L.marker([target.lat, target.lon]).addTo(resultMap).bindPopup(escapeHtml(target.name));
       resultMap.fitBounds(L.latLngBounds([[sLat, sLon], [target.lat, target.lon]]), { padding: [30, 30] });
       L.polyline([[sLat, sLon], [target.lat, target.lon]], {
         color: "#ff6b35", weight: 3, dashArray: "8,8"
@@ -946,7 +956,7 @@
       }).addTo(resultMap);
       const latlngs = [[sLat, sLon], ...targets.map(t => [t.lat, t.lon]), [sLat, sLon]];
       L.marker([sLat, sLon]).addTo(resultMap).bindPopup("Start");
-      targets.forEach((t, i) => L.marker([t.lat, t.lon]).addTo(resultMap).bindPopup(`Stop ${i + 1}: ${t.name}`));
+      targets.forEach((t, i) => L.marker([t.lat, t.lon]).addTo(resultMap).bindPopup(`Stop ${i + 1}: ${escapeHtml(t.name)}`));
       resultMap.fitBounds(L.latLngBounds(latlngs), { padding: [30, 30] });
       L.polyline(latlngs, { color: "#ff6b35", weight: 3, dashArray: "8,8" }).addTo(resultMap);
 
@@ -1094,7 +1104,7 @@
         slat: sLat, slon: sLon, sname: startText || "",
         tlat: target.lat, tlon: target.lon, tname: target.name,
         tdesc: target.desc, tloc: target.loc || "", tlink: target.link || "",
-        tphoto: target.photoUrl || "", tsource: target.source || "osm",
+        tphoto: target.photoUrl || "", twiki: target.wikipedia || "", tsource: target.source || "osm",
         mode: luckyMode, sec: secFilter, trip: tripType
       });
       const url = `${location.origin}${location.pathname}?${params.toString()}`;
@@ -1109,21 +1119,62 @@
     // On load, replay a shared result straight from the URL instead of
     // running a live search — same rendering path (renderTarget), just fed
     // a target that was already found rather than a fresh one.
+    //
+    // A share link is just an address, so anyone can edit one by hand to make
+    // this page show made-up text or pictures. Every value is cleaned first:
+    // text is capped and stripped of control / direction-override characters,
+    // a photo or link is only kept if it points at the real sources the page
+    // itself uses (Wikimedia / Wikipedia photos; OpenStreetMap, Wikipedia or
+    // Wikidata links), coordinates must be on Earth. A value that fails is
+    // simply dropped — the target still shows, just without it.
+    const SHARE_PHOTO_HOSTS = { exact: ["upload.wikimedia.org"], suffix: [".wikimedia.org", ".wikipedia.org"] };
+    const SHARE_LINK_HOSTS = { exact: ["openstreetmap.org", "www.openstreetmap.org", "wikidata.org", "www.wikidata.org"], suffix: [".wikipedia.org"] };
+
+    function shareText(raw, max) {
+      const clean = String(raw || "")
+        .replace(/[\u0000-\u001F\u007F-\u009F\u200E\u200F\u202A-\u202E\u2066-\u2069]/g, " ")
+        .replace(/\s+/g, " ").trim();
+      return Array.from(clean).slice(0, max).join("");
+    }
+
+    function shareUrlFrom(raw, hosts) {
+      const safe = safeUrl(raw || "");
+      if (!safe || !raw) return null;
+      try {
+        const u = new URL(safe);
+        const host = u.hostname.toLowerCase();
+        if (u.protocol !== "https:" || u.username || u.password) return null;
+        return (hosts.exact.includes(host) || hosts.suffix.some(sfx => host.endsWith(sfx))) ? u.href : null;
+      } catch {
+        return null;
+      }
+    }
+
     (function loadSharedResultFromUrl() {
       const params = new URLSearchParams(location.search);
-      const tlat = parseFloat(params.get("tlat"));
-      const tlon = parseFloat(params.get("tlon"));
-      if (!params.has("tname") || isNaN(tlat) || isNaN(tlon)) return;
+      const num = (key) => {
+        const v = params.get(key);
+        return v === null || v.trim() === "" ? NaN : Number(v);
+      };
+      const onEarth = (lat, lon) =>
+        Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180;
 
-      const slat = parseFloat(params.get("slat"));
-      const slon = parseFloat(params.get("slon"));
-      const hasStart = !isNaN(slat) && !isNaN(slon);
+      const tlat = num("tlat");
+      const tlon = num("tlon");
+      if (!params.has("tname") || !onEarth(tlat, tlon)) return;
 
-      if (params.get("mode")) {
+      const slat = num("slat");
+      const slon = num("slon");
+      const hasStart = onEarth(slat, slon);
+
+      // Only accept mode / filter values that match a real button on the page.
+      const knownModes = Array.from(document.querySelectorAll(".lucky-btn")).map(b => b.dataset.lucky);
+      const knownSecs = Array.from(document.querySelectorAll(".sec-btn")).map(b => b.dataset.sec);
+      if (knownModes.includes(params.get("mode"))) {
         luckyMode = params.get("mode");
         document.querySelectorAll(".lucky-btn").forEach(b => b.classList.toggle("active", b.dataset.lucky === luckyMode));
       }
-      if (params.get("sec")) {
+      if (knownSecs.includes(params.get("sec"))) {
         secFilter = params.get("sec");
         document.querySelectorAll(".sec-btn").forEach(b => b.classList.toggle("active", b.dataset.sec === secFilter));
       }
@@ -1132,21 +1183,25 @@
       document.getElementById("tripReturnSame").checked = tripType === "return-same";
       document.getElementById("tripReturnOther").checked = tripType === "return-other";
 
-      const startText = params.get("sname") || "";
+      const startText = shareText(params.get("sname"), 120);
       if (startText) document.getElementById("start").value = startText;
       if (hasStart) {
         startLatLon = { lat: slat, lon: slon };
         mapInteracted = true;
       }
 
+      // Wikipedia tag as OpenStreetMap stores it ("en:Title") — lets the
+      // replay fetch the live Wikipedia thumbnail when no photo is kept.
+      const wiki = shareText(params.get("twiki"), 200);
       const target = {
-        name: params.get("tname") || "Shared target",
-        desc: params.get("tdesc") || "",
-        loc: params.get("tloc") || "",
+        name: shareText(params.get("tname"), 120) || "Shared target",
+        desc: shareText(params.get("tdesc"), 300),
+        loc: shareText(params.get("tloc"), 120),
         lat: tlat, lon: tlon,
-        link: params.get("tlink") || null,
-        photoUrl: params.get("tphoto") || null,
-        source: params.get("tsource") || "osm"
+        link: shareUrlFrom(params.get("tlink"), SHARE_LINK_HOSTS),
+        photoUrl: shareUrlFrom(params.get("tphoto"), SHARE_PHOTO_HOSTS),
+        wikipedia: /^[a-z]{2,3}(-[a-z0-9]{1,8})*:[^:#?\/][^#?]*$/i.test(wiki) ? wiki : null,
+        source: ["osm", "news", "wikidata"].includes(params.get("tsource")) ? params.get("tsource") : "osm"
       };
 
       const sLat = hasStart ? slat : tlat;
@@ -1161,8 +1216,9 @@
   <script>
     // ---- RudVentur Universe map: a small draggable/resizable box organizer ----
     // Self-contained (own state, own element ids) so it can't collide with the
-    // Lucky search engine above. Nothing here persists across a reload — it's a
-    // toy for exploring/rearranging the network, not a saved layout.
+    // Lucky search engine above. The layout (positions, sizes, labels, links,
+    // added / deleted boxes) is saved to this browser's localStorage and
+    // restored on reload; "Reset to default" brings back the built-in boxes.
     (function () {
       const initialBoxes = [
         { id: 0, label: "RudVentur Universe", x: 350, y: 240, size: 180, url: "https://www.rudventur.com", isCenter: true },
@@ -1174,8 +1230,78 @@
         { id: 6, label: "RudVentur Social", x: 560, y: 450, size: 140, url: "", isCenter: false }
       ];
 
-      let boxes = JSON.parse(JSON.stringify(initialBoxes));
-      let nextId = Math.max(...boxes.map(b => b.id)) + 1;
+      const STORAGE_KEY = 'rudTrip20.universe.v1';
+      const BOARD_W = 860, BOARD_H = 600, MIN_SIZE = 80, MAX_SIZE = 600;
+
+      // Keeps a stored link only if it is a real http/https address.
+      // A bare "example.com" gets https:// added, like a browser address bar.
+      function cleanLink(raw) {
+        const text = String(raw || '').trim();
+        if (!text) return '';
+        const withScheme = /^[a-z][a-z0-9+.-]*:/i.test(text) ? text : 'https://' + text;
+        try {
+          const u = new URL(withScheme);
+          if (u.protocol !== 'http:' && u.protocol !== 'https:') return '';
+          return rvuSafeUrl(u.href);
+        } catch {
+          return '';
+        }
+      }
+
+      // Checks one stored box; returns a cleaned copy or null if unusable.
+      function cleanBox(b) {
+        if (!b || typeof b !== 'object') return null;
+        if (!Number.isInteger(b.id) || b.id < 0) return null;
+        if (![b.x, b.y, b.size].every(Number.isFinite)) return null;
+        const size = Math.min(MAX_SIZE, Math.max(MIN_SIZE, b.size));
+        return {
+          id: b.id,
+          label: (typeof b.label === 'string' ? b.label.replace(/[\u0000-\u001F\u007F]/g, ' ').trim().slice(0, 80) : '') || 'Untitled',
+          x: Math.min(BOARD_W - size, Math.max(0, b.x)),
+          y: Math.min(BOARD_H - size, Math.max(0, b.y)),
+          size,
+          url: cleanLink(b.url),
+          isCenter: b.isCenter === true
+        };
+      }
+
+      function defaultBoxes() {
+        return JSON.parse(JSON.stringify(initialBoxes));
+      }
+
+      // Saved layout if there is a valid one, otherwise the built-in boxes.
+      function loadBoxes() {
+        try {
+          const raw = localStorage.getItem(STORAGE_KEY);
+          if (!raw) return defaultBoxes();
+          const data = JSON.parse(raw);
+          if (!data || data.version !== 1 || !Array.isArray(data.boxes) || data.boxes.length > 200) return defaultBoxes();
+          const seen = new Set();
+          const cleaned = [];
+          data.boxes.forEach(b => {
+            const box = cleanBox(b);
+            if (box && !seen.has(box.id)) { seen.add(box.id); cleaned.push(box); }
+          });
+          return cleaned;
+        } catch {
+          return defaultBoxes();
+        }
+      }
+
+      function saveBoxes() {
+        try {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 1, boxes }));
+        } catch {
+          statusEl.textContent = 'Could not save the layout in this browser (storage blocked or full).';
+        }
+      }
+
+      function computeNextId() {
+        return boxes.reduce((max, b) => Math.max(max, b.id), -1) + 1;
+      }
+
+      let boxes = loadBoxes();
+      let nextId = computeNextId();
       let selectedId = null;
       let isDragging = false, isResizing = false;
       let dragOffsetX = 0, dragOffsetY = 0;
@@ -1185,6 +1311,7 @@
       const btnAdd = document.getElementById('rvuAdd');
       const btnEdit = document.getElementById('rvuEdit');
       const btnDelete = document.getElementById('rvuDelete');
+      const btnReset = document.getElementById('rvuReset');
       const statusEl = document.getElementById('rvuStatus');
       const modalOverlay = document.getElementById('rvuModalOverlay');
       const inputLabel = document.getElementById('rvuInputLabel');
@@ -1312,6 +1439,7 @@
       }
 
       function stopDrag() {
+        if (isDragging) saveBoxes();
         isDragging = false;
         document.removeEventListener('mousemove', onDrag);
         document.removeEventListener('mouseup', stopDrag);
@@ -1355,6 +1483,7 @@
       }
 
       function stopResize() {
+        if (isResizing) saveBoxes();
         isResizing = false;
         document.removeEventListener('mousemove', onResize);
         document.removeEventListener('mouseup', stopResize);
@@ -1371,6 +1500,7 @@
           isCenter: false
         };
         boxes.push(newBox);
+        saveBoxes();
         selectBox(newBox.id);
         openEditModal(newBox.id);
       });
@@ -1383,6 +1513,16 @@
         if (selectedId === null) return;
         if (!confirm('Delete this box?')) return;
         boxes = boxes.filter(b => b.id !== selectedId);
+        selectedId = null;
+        saveBoxes();
+        render();
+      });
+
+      btnReset.addEventListener('click', () => {
+        if (!confirm('Reset the Universe map to the original boxes? Your saved layout will be forgotten.')) return;
+        try { localStorage.removeItem(STORAGE_KEY); } catch { /* storage blocked — nothing saved anyway */ }
+        boxes = defaultBoxes();
+        nextId = computeNextId();
         selectedId = null;
         render();
       });
@@ -1401,10 +1541,13 @@
       btnSave.addEventListener('click', () => {
         const box = boxes.find(b => b.id === selectedId);
         if (!box) return;
-        box.label = inputLabel.value.trim() || 'Untitled';
-        box.url = inputUrl.value.trim();
+        box.label = inputLabel.value.trim().slice(0, 80) || 'Untitled';
+        const typedUrl = inputUrl.value.trim();
+        box.url = cleanLink(typedUrl);
         modalOverlay.classList.remove('rvu-show');
+        saveBoxes();
         render();
+        if (typedUrl && !box.url) statusEl.textContent = 'Link not saved — only http:// or https:// addresses are allowed.';
       });
 
       btnCancel.addEventListener('click', () => {
