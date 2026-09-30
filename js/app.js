@@ -32,23 +32,33 @@ function leafletBoundsFromBbox(bbox) {
 function activeContinentIds() {
   return Object.entries(state.continents).filter(([, v]) => v).map(([k]) => k);
 }
-function fakeMap() {
-  return { getBounds: () => leafletBoundsFromBbox(shrinkBbox(globe.unionBbox())) };
+function selectedCountries() {
+  const ids = activeContinentIds();
+  const names = [];
+  ids.forEach((id) => {
+    (CONTINENTS[id].countries || []).forEach((c) => {
+      if (state.countries[c] !== false) names.push(c);
+    });
+  });
+  return names;
 }
-
+function searchBbox() {
+  const engine = window.TripSearchEngine;
+  const countries = selectedCountries();
+  if (countries.length && engine?.countryCentroid) {
+    const name = countries[Math.floor(Math.random() * countries.length)];
+    const c = engine.countryCentroid(name);
+    if (c) return engine.bboxAroundCentroid(c[0], c[1], 2.2, 2.8);
+  }
+  return shrinkBbox(globe.unionBbox());
+}
+function fakeMap() {
+  return { getBounds: () => leafletBoundsFromBbox(searchBbox()) };
+}
 function engineMode(kind) {
   if (kind === "event") return "event";
   if (kind === "trip") return "both";
   return "place";
-}
-
-function tagHint(kind) {
-  if (state.worlds.ruins) return "ruins";
-  if (state.worlds.beauty) return "viewpoint";
-  if (state.worlds.topographic) return "peak";
-  if (state.worlds.astronomical) return "observatory";
-  if (state.worlds.businesses && kind === "place") return "market";
-  return "";
 }
 
 document.querySelectorAll(".bar").forEach((bar) => {
@@ -68,7 +78,6 @@ function renderContinents() {
     });
   });
 }
-
 function renderRegions() {
   const wrap = document.getElementById("region-block");
   const ids = activeContinentIds();
@@ -84,19 +93,16 @@ function renderRegions() {
     el.addEventListener("change", () => { state.countries[el.dataset.country] = el.checked; });
   });
 }
-
 function bindToggles(sel, bucket) {
   document.querySelectorAll(sel).forEach((el) => {
     el.checked = !!bucket[el.dataset.key];
     el.addEventListener("change", () => { bucket[el.dataset.key] = el.checked; });
   });
 }
-
 renderContinents();
 renderRegions();
 bindToggles("#world-ticks input", state.worlds);
 bindToggles("#mode-ticks input", state.modes);
-
 document.querySelectorAll("[data-days]").forEach((btn) => {
   btn.addEventListener("click", () => {
     state.days = Number(btn.dataset.days);
@@ -115,13 +121,11 @@ document.querySelectorAll("[data-era]").forEach((btn) => {
     document.querySelectorAll("[data-era]").forEach((b) => b.classList.toggle("on", b === btn));
   });
 });
-
 function setLucky(which) {
   document.querySelectorAll(".lucky[data-lucky]").forEach((b) => {
     b.classList.toggle("on", b.dataset.lucky === which);
   });
 }
-
 async function locate() {
   const status = document.getElementById("status");
   try {
@@ -142,9 +146,7 @@ async function locate() {
   }
   globe.paint();
 }
-
 document.getElementById("gps-btn").addEventListener("click", locate);
-
 function paintStory(kind, target, extras = []) {
   state.target = { lat: target.lat, lon: target.lon, name: target.name };
   state.extras = extras;
@@ -155,20 +157,14 @@ function paintStory(kind, target, extras = []) {
   document.getElementById("target-loc").textContent =
     `${target.loc} · ${target.source}${extras.length ? " · " + extras.map((e) => e.name).join(" · ") : ""}`;
   const story = buildStory({
-    startName: state.startName,
-    start: state.start,
-    target,
-    extras,
-    modes: state.modes,
-    days: state.days,
-    returning: state.returning
+    startName: state.startName, start: state.start, target, extras,
+    modes: state.modes, days: state.days, returning: state.returning
   });
   document.getElementById("chain").innerHTML = story.lines.map((line, i) => {
     if (i === 0 || line === "FINISH") return `<div class="step">${line}</div>`;
     return `<div class="step"><span class="who">${line}</span></div>`;
   }).join("");
 }
-
 async function roll(kind) {
   const status = document.getElementById("status");
   const buttons = document.querySelectorAll("[data-lucky]");
@@ -182,14 +178,14 @@ async function roll(kind) {
     if (kind === "trip") {
       const count = Math.min(4, 1 + state.days);
       const result = await window.TripSearchEngine.fetchRandomTargets(
-        map, engineMode(kind), state.era, tagHint(kind), count, say
+        map, engineMode(kind), state.era, "", count, say, state.worlds
       );
       if (!result?.targets?.length) { status.textContent = "No luck this trip."; return; }
       const [first, ...rest] = result.targets;
       paintStory("trip", first, rest);
     } else {
       const result = await window.TripSearchEngine.fetchRandomTarget(
-        map, engineMode(kind), state.era, tagHint(kind), say
+        map, engineMode(kind), state.era, "", say, state.worlds
       );
       if (!result?.target) { status.textContent = "No luck this roll."; return; }
       paintStory(kind, result.target, []);
@@ -202,11 +198,9 @@ async function roll(kind) {
     buttons.forEach((b) => { b.disabled = false; });
   }
 }
-
 document.getElementById("lucky-place").addEventListener("click", () => roll("place"));
 document.getElementById("lucky-event").addEventListener("click", () => roll("event"));
 document.getElementById("lucky-trip").addEventListener("click", () => roll("trip"));
-
 async function bootNews() {
   const summary = document.getElementById("news-summary");
   const meta = document.getElementById("news-meta");
@@ -224,7 +218,6 @@ async function bootNews() {
       <span class="news-source">${it.source}</span></div></li>`).join("")}</ul>`;
   } catch { summary.textContent = "News offline."; }
 }
-
 async function bootWeather() {
   const summary = document.getElementById("wx-summary");
   const body = document.getElementById("wx-body");
@@ -240,5 +233,4 @@ async function bootWeather() {
       </div>`).join("")}</div>`;
   } catch { summary.textContent = "Weather offline."; }
 }
-
 locate().then(() => { bootNews(); bootWeather(); });
