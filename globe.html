@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>rudTrip20 · globe</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+  <header class="app-header">
+    <div class="mark">rud<span>Trip20</span></div>
+    <div class="mode">globe-itinerary · live roll</div>
+  </header>
+
+  <section class="bar" id="news-bar">
+    <button class="bar-head" type="button">
+      <span class="bar-label">News</span>
+      <span class="bar-summary" id="news-summary">Loading headlines…</span>
+      <span class="bar-meta" id="news-meta">live</span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="bar-body" id="news-body"></div>
+  </section>
+
+  <section class="bar" id="weather-bar">
+    <button class="bar-head" type="button">
+      <span class="bar-label">Weather</span>
+      <span class="bar-summary" id="wx-summary">Reading sky…</span>
+      <span class="bar-meta">open-meteo</span>
+      <span class="chev">▾</span>
+    </button>
+    <div class="bar-body" id="wx-body"></div>
+  </section>
+
+  <main class="stage">
+    <div class="globe-wrap">
+      <svg id="globe" role="img" aria-label="Continent globe"></svg>
+    </div>
+    <aside class="side">
+      <div>
+        <div class="group-title">Continents</div>
+        <div class="ticks" id="continent-ticks"></div>
+      </div>
+      <div id="region-block" hidden>
+        <div class="group-title" id="region-title">Regions</div>
+        <div class="ticks" id="region-ticks"></div>
+      </div>
+      <div>
+        <div class="group-title">Worlds</div>
+        <div class="ticks" id="world-ticks">
+          <label><input type="checkbox" data-key="places"> places</label>
+          <label><input type="checkbox" data-key="businesses"> businesses</label>
+          <label><input type="checkbox" data-key="ruins"> ruins</label>
+          <label><input type="checkbox" data-key="beauty"> beauty</label>
+          <label><input type="checkbox" data-key="topographic"> topographic</label>
+          <label><input type="checkbox" data-key="astronomical"> astronomical</label>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">When</div>
+        <div class="days">
+          <button data-era="past" type="button">Past</button>
+          <button class="on" data-era="present" type="button">Present</button>
+          <button data-era="future" type="button">Future</button>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">Transport</div>
+        <div class="ticks" id="mode-ticks">
+          <label><input type="checkbox" data-key="walk"> walk</label>
+          <label><input type="checkbox" data-key="bike"> bike</label>
+          <label><input type="checkbox" data-key="bus"> bus</label>
+          <label><input type="checkbox" data-key="taxi"> taxi</label>
+          <label><input type="checkbox" data-key="train"> train</label>
+          <label><input type="checkbox" data-key="ferry"> ferry</label>
+          <label><input type="checkbox" data-key="flight"> flight</label>
+        </div>
+      </div>
+      <div>
+        <div class="group-title">Length</div>
+        <div class="days">
+          <button class="on" data-days="1" type="button">1 day</button>
+          <button data-days="2" type="button">2 days</button>
+          <button data-days="3" type="button">3 days</button>
+        </div>
+        <div class="dir days" style="margin-top:.4rem">
+          <button class="on" data-dir="one" type="button">one way</button>
+          <button data-dir="return" type="button">return to start</button>
+        </div>
+      </div>
+      <div class="lucky-row">
+        <button class="lucky on" id="lucky-place" type="button">Lucky Place</button>
+        <button class="lucky" type="button" disabled>Lucky Event</button>
+        <button class="lucky" type="button" disabled>Good Trip</button>
+      </div>
+      <button class="lucky" id="gps-btn" type="button">Use GPS start</button>
+      <p class="status" id="status"></p>
+      <div class="target-name" id="target-name">No roll yet.</div>
+      <div class="target-loc" id="target-loc"></div>
+      <div class="chain" id="chain"></div>
+      <p class="legacy"><a href="index.html">old Feeling Lucky page</a></p>
+    </aside>
+  </main>
+
+  <footer class="app-footer">
+    <span>branch globe-itinerary</span>
+    <span>no street routing · live OSM / GDELT</span>
+  </footer>
+
+  <script src="search-engine.js"></script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
