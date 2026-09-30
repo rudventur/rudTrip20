@@ -18,6 +18,7 @@ const state = {
   start: { lat: 51.5074, lon: -0.1278 },
   startName: "London",
   target: null,
+  extras: [],
   onChange() { renderRegions(); globe.paint(); }
 };
 
@@ -30,6 +31,24 @@ function leafletBoundsFromBbox(bbox) {
 }
 function activeContinentIds() {
   return Object.entries(state.continents).filter(([, v]) => v).map(([k]) => k);
+}
+function fakeMap() {
+  return { getBounds: () => leafletBoundsFromBbox(shrinkBbox(globe.unionBbox())) };
+}
+
+function engineMode(kind) {
+  if (kind === "event") return "event";
+  if (kind === "trip") return "both";
+  return "place";
+}
+
+function tagHint(kind) {
+  if (state.worlds.ruins) return "ruins";
+  if (state.worlds.beauty) return "viewpoint";
+  if (state.worlds.topographic) return "peak";
+  if (state.worlds.astronomical) return "observatory";
+  if (state.worlds.businesses && kind === "place") return "market";
+  return "";
 }
 
 document.querySelectorAll(".bar").forEach((bar) => {
@@ -97,6 +116,12 @@ document.querySelectorAll("[data-era]").forEach((btn) => {
   });
 });
 
+function setLucky(which) {
+  document.querySelectorAll(".lucky[data-lucky]").forEach((b) => {
+    b.classList.toggle("on", b.dataset.lucky === which);
+  });
+}
+
 async function locate() {
   const status = document.getElementById("status");
   try {
@@ -120,48 +145,67 @@ async function locate() {
 
 document.getElementById("gps-btn").addEventListener("click", locate);
 
-function tagHint() {
-  if (state.worlds.ruins) return "ruins";
-  if (state.worlds.beauty) return "viewpoint";
-  return "";
+function paintStory(kind, target, extras = []) {
+  state.target = { lat: target.lat, lon: target.lon, name: target.name };
+  state.extras = extras;
+  globe.paint();
+  document.getElementById("target-name").textContent = kind === "trip"
+    ? `${target.name} + ${extras.length} more`
+    : target.name;
+  document.getElementById("target-loc").textContent =
+    `${target.loc} · ${target.source}${extras.length ? " · " + extras.map((e) => e.name).join(" · ") : ""}`;
+  const story = buildStory({
+    startName: state.startName,
+    start: state.start,
+    target,
+    extras,
+    modes: state.modes,
+    days: state.days,
+    returning: state.returning
+  });
+  document.getElementById("chain").innerHTML = story.lines.map((line, i) => {
+    if (i === 0 || line === "FINISH") return `<div class="step">${line}</div>`;
+    return `<div class="step"><span class="who">${line}</span></div>`;
+  }).join("");
 }
 
-async function luckyPlace() {
+async function roll(kind) {
   const status = document.getElementById("status");
-  const btn = document.getElementById("lucky-place");
-  btn.disabled = true;
+  const buttons = document.querySelectorAll("[data-lucky]");
+  buttons.forEach((b) => { b.disabled = true; });
   status.classList.remove("status-bad");
-  status.textContent = "Rolling a live place…";
+  setLucky(kind);
+  status.textContent = kind === "trip" ? "Rolling a live trip…" : kind === "event" ? "Rolling a live event…" : "Rolling a live place…";
   try {
-    const bbox = shrinkBbox(globe.unionBbox());
-    const map = { getBounds: () => leafletBoundsFromBbox(bbox) };
-    const result = await window.TripSearchEngine.fetchRandomTarget(
-      map, "place", state.era, tagHint(), (m) => { status.textContent = m || "Rolling…"; }
-    );
-    if (!result?.target) { status.textContent = "No luck this roll."; return; }
-    const t = result.target;
-    state.target = { lat: t.lat, lon: t.lon, name: t.name };
-    globe.paint();
-    document.getElementById("target-name").textContent = t.name;
-    document.getElementById("target-loc").textContent = `${t.loc} · ${t.source}${result.widened ? " · widened" : ""}`;
-    const story = buildStory({
-      startName: state.startName, start: state.start, target: state.target,
-      modes: state.modes, days: state.days, returning: state.returning
-    });
-    document.getElementById("chain").innerHTML = story.lines.map((line, i) => {
-      if (i === 0 || line === "FINISH") return `<div class="step">${line}</div>`;
-      return `<div class="step"><span class="who">${line}</span></div>`;
-    }).join("");
+    const map = fakeMap();
+    const say = (m) => { status.textContent = m || "Rolling…"; };
+    if (kind === "trip") {
+      const count = Math.min(4, 1 + state.days);
+      const result = await window.TripSearchEngine.fetchRandomTargets(
+        map, engineMode(kind), state.era, tagHint(kind), count, say
+      );
+      if (!result?.targets?.length) { status.textContent = "No luck this trip."; return; }
+      const [first, ...rest] = result.targets;
+      paintStory("trip", first, rest);
+    } else {
+      const result = await window.TripSearchEngine.fetchRandomTarget(
+        map, engineMode(kind), state.era, tagHint(kind), say
+      );
+      if (!result?.target) { status.textContent = "No luck this roll."; return; }
+      paintStory(kind, result.target, []);
+    }
     status.textContent = "";
   } catch (err) {
     status.textContent = err.message || "Roll failed.";
     status.classList.add("status-bad");
   } finally {
-    btn.disabled = false;
+    buttons.forEach((b) => { b.disabled = false; });
   }
 }
 
-document.getElementById("lucky-place").addEventListener("click", luckyPlace);
+document.getElementById("lucky-place").addEventListener("click", () => roll("place"));
+document.getElementById("lucky-event").addEventListener("click", () => roll("event"));
+document.getElementById("lucky-trip").addEventListener("click", () => roll("trip"));
 
 async function bootNews() {
   const summary = document.getElementById("news-summary");
