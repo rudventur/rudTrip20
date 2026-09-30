@@ -1,7 +1,13 @@
-/* Patch TripSearchEngine so world ticks become OSM tags, not name keywords. */
+/* Fold world ticks into live Overpass queries. Ruins etc. are tags, not name keywords. */
 (function (global) {
   const E = global.TripSearchEngine;
   if (!E) return;
+
+  const ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+  ];
 
   const WORLD_TAGS = {
     ruins: [["historic", "ruins|archaeological_site|fort|castle|monument"]],
@@ -11,12 +17,16 @@
     businesses: [["amenity", "cafe|restaurant|marketplace|pub"]]
   };
 
+  const MODE_TAGS = {
+    place: [["tourism", "attraction|museum|viewpoint|artwork|gallery"], ["historic", ".*"], ["leisure", "park|garden"]],
+    event: [["amenity", "theatre|cinema|arts_centre|events_venue|marketplace"], ["leisure", "stadium|sports_centre"]],
+    both: [["tourism", "attraction|museum"], ["amenity", "theatre|events_venue"], ["historic", ".*"]]
+  };
+
   E.tagsFromWorlds = function (worlds) {
     const extra = [];
     if (!worlds) return extra;
-    Object.keys(WORLD_TAGS).forEach((k) => {
-      if (worlds[k]) extra.push(...WORLD_TAGS[k]);
-    });
+    Object.keys(WORLD_TAGS).forEach((k) => { if (worlds[k]) extra.push(...WORLD_TAGS[k]); });
     return extra;
   };
 
@@ -24,24 +34,92 @@
     return [Math.max(-85, lat - spanLat), lon - spanLon, Math.min(85, lat + spanLat), lon + spanLon];
   };
 
-  const CENTROIDS = {
-    "united states": [39.8, -98.6], canada: [56.1, -106.3], mexico: [23.6, -102.6],
-    "united kingdom": [54.0, -2.9], ireland: [53.4, -8.2], france: [46.6, 2.2],
-    germany: [51.2, 10.4], spain: [40.0, -3.7], portugal: [39.6, -8.0],
-    italy: [42.8, 12.6], poland: [52.0, 19.1], greece: [39.1, 21.8],
-    sweden: [62.0, 15.0], japan: [36.2, 138.3], india: [22.4, 78.7],
-    china: [35.9, 104.2], thailand: [15.9, 100.9], indonesia: [-2.5, 118.0],
-    "south korea": [35.9, 127.8], turkey: [39.0, 35.2], vietnam: [14.1, 108.3],
-    brazil: [-10.3, -53.2], argentina: [-35.4, -65.2], chile: [-35.7, -71.5],
-    peru: [-9.2, -75.0], colombia: [4.6, -74.3], australia: [-25.3, 133.8],
-    "new zealand": [-41.0, 174.9], fiji: [-17.7, 178.1], "papua new guinea": [-6.3, 143.9],
-    egypt: [26.8, 30.8], morocco: [31.8, -7.1], kenya: [0, 37.9],
-    nigeria: [9.1, 8.7], "south africa": [-30.6, 22.9], ethiopia: [9.1, 40.5],
-    ghana: [7.9, -1.0], tanzania: [-6.4, 34.9], cuba: [21.5, -79.5], guatemala: [15.8, -90.2]
+  E.countryCentroid = E.countryCentroid || function (name) {
+    const table = E.COUNTRY_CENTROIDS || {};
+    return name ? (table[String(name).trim().toLowerCase()] || null) : null;
   };
 
-  E.countryCentroid = E.countryCentroid || function (name) {
-    if (!name) return null;
-    return CENTROIDS[String(name).trim().toLowerCase()] || null;
+  function pairsFor(mode, worlds) {
+    const extra = E.tagsFromWorlds(worlds);
+    if (extra.length && worlds && !worlds.places) return extra;
+    return [...(MODE_TAGS[mode] || MODE_TAGS.place), ...extra];
+  }
+
+  function query(bbox, tagPairs, limit) {
+    const [s, w, n, e] = bbox;
+    const clauses = tagPairs.map(([k, v]) => {
+      const pattern = v === ".*" ? ".*" : "^(" + v + ")$";
+      return "nwr[\"" + k + "\"~\"" + pattern + "\"](" + s + "," + w + "," + n + "," + e + ");";
+    }).join("");
+    return "[out:json][timeout:15];(" + clauses + ");out center " + limit + ";";
+  }
+
+  function describe(el) {
+    const tags = el.tags || {};
+    const lat = typeof el.lat === "number" ? el.lat : el.center && el.center.lat;
+    const lon = typeof el.lon === "number" ? el.lon : el.center && el.center.lon;
+    if (typeof lat !== "number" || typeof lon !== "number") return null;
+    const label = tags.historic || tags.tourism || tags.natural || tags.amenity || tags.leisure || tags.man_made || "Place";
+    return {
+      name: tags.name || "Unnamed " + label,
+      loc: tags["addr:city"] || tags["addr:town"] || label,
+      lat, lon,
+      desc: "OpenStreetMap · " + label,
+      link: tags.website || null,
+      source: "osm"
+    };
+  }
+
+  async function overpassPool(map, mode, worlds, limit, onStatus) {
+    const b = map.getBounds();
+    const bbox = [b.getSouth(), b.getWest(), b.getNorth(), b.getEast()];
+    const q = query(bbox, pairsFor(mode, worlds), limit);
+    if (onStatus) onStatus("Searching OpenStreetMap tags live…");
+    const errors = [];
+    const tries = ENDPOINTS.map(async (ep) => {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const res = await fetch(ep, { method: "POST", body: "data=" + encodeURIComponent(q), signal: ctrl.signal });
+        const text = await res.text();
+        if (!res.ok) throw new Error(res.status);
+        return JSON.parse(text);
+      } finally { clearTimeout(t); }
+    });
+    let data = null;
+    await Promise.all(tries.map((p) => p.then((d) => { if (!data && d && d.elements) data = d; }).catch((e) => errors.push(String(e)))));
+    if (!data) throw new Error(errors.join(" | ") || "overpass failed");
+    const pool = [];
+    (data.elements || []).forEach((el) => { const t = describe(el); if (t) pool.push(t); });
+    return pool;
+  }
+
+  const origTarget = E.fetchRandomTarget.bind(E);
+  const origTargets = E.fetchRandomTargets.bind(E);
+
+  E.fetchRandomTarget = async function (map, mode, sec, keyword, onStatus, worlds) {
+    try {
+      const pool = await overpassPool(map, mode, worlds, 35, onStatus);
+      if (pool.length) return { target: pool[Math.floor(Math.random() * pool.length)], widened: false };
+    } catch (err) {
+      if (onStatus) onStatus("Tag search missed — using engine fallback…");
+    }
+    return origTarget(map, mode, sec, "", onStatus);
+  };
+
+  E.fetchRandomTargets = async function (map, mode, sec, keyword, count, onStatus, worlds) {
+    try {
+      const pool = await overpassPool(map, mode, worlds, Math.min(60, Math.max(35, count * 12)), onStatus);
+      if (pool.length) {
+        for (let i = pool.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          const tmp = pool[i]; pool[i] = pool[j]; pool[j] = tmp;
+        }
+        return { targets: pool.slice(0, count), widened: false };
+      }
+    } catch (err) {
+      if (onStatus) onStatus("Tag search missed — using engine fallback…");
+    }
+    return origTargets(map, mode, sec, "", count, onStatus);
   };
 })(window);
