@@ -122,6 +122,46 @@
       }
       const read = host.parentElement && host.parentElement.querySelector(".grid-readout");
       if (read) read.textContent = "cell " + lonStep + "° × " + latStep + "° · " + view.lonSpan.toFixed(1) + "° across";
+      paintMini();
+    }
+    function paintMini() {
+      const mini = document.getElementById("miniMap");
+      if (!mini) return;
+      mini.innerHTML = "";
+      const m = document.createElementNS(ns, "svg");
+      m.setAttribute("viewBox", "0 0 360 180");
+      m.style.width = "100%"; m.style.height = "100%"; m.style.display = "block";
+      mini.appendChild(m);
+      const sea = document.createElementNS(ns, "rect");
+      sea.setAttribute("width", 360); sea.setAttribute("height", 180); sea.setAttribute("fill", "#10110e");
+      m.appendChild(sea);
+      for (const ring of Object.values(SHAPES)) {
+        const d = ring.map((pt, i) => (i ? "L" : "M") + (pt[0] + 180).toFixed(1) + "," + (90 - pt[1]).toFixed(1)).join(" ") + " Z";
+        const path = document.createElementNS(ns, "path");
+        path.setAttribute("d", d); path.setAttribute("fill", "#3d4430"); path.setAttribute("stroke", "#e8d48a"); path.setAttribute("stroke-width", "0.6");
+        m.appendChild(path);
+      }
+      const west = view.lon - view.lonSpan / 2, north = view.lat + view.latSpan / 2;
+      const rect = document.createElementNS(ns, "rect");
+      rect.setAttribute("x", west + 180);
+      rect.setAttribute("y", 90 - north);
+      rect.setAttribute("width", Math.max(2, view.lonSpan));
+      rect.setAttribute("height", Math.max(2, view.latSpan));
+      rect.setAttribute("fill", "rgba(255,107,53,.25)");
+      rect.setAttribute("stroke", "#ff6b35");
+      rect.setAttribute("stroke-width", "1.2");
+      m.appendChild(rect);
+    }
+    const miniHost = document.getElementById("miniMap");
+    if (miniHost) {
+      miniHost.addEventListener("click", (e) => {
+        const r = miniHost.getBoundingClientRect();
+        view.lon = (e.clientX - r.left) / r.width * 360 - 180;
+        view.lat = 90 - (e.clientY - r.top) / r.height * 180;
+        view.lat = Math.max(-75, Math.min(75, view.lat));
+        paint();
+        listeners.moveend.forEach((fn) => fn());
+      });
     }
 
     svg.addEventListener("wheel", (e) => {
@@ -169,6 +209,7 @@
         paint();
       },
       on(ev, fn) { (listeners[ev] || (listeners[ev] = [])).push(fn); },
+      getView() { return { ...view }; },
       randomCell() {
         const b = bounds();
         const latStep = stepFor(view.latSpan);

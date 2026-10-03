@@ -68,6 +68,13 @@
       border: 1px solid var(--border); border-radius: 11px; overflow: hidden;
     }
     #mainMap { height: 260px; width: 100%; background: #1a1d24; }
+    .map-row { display: flex; gap: 8px; align-items: stretch; }
+    #miniMap { width: 168px; flex: 0 0 168px; height: 260px; border: 1px solid var(--border); border-radius: 11px; background: #10110e; cursor: pointer; }
+    @media (max-width: 640px) { .map-row { flex-direction: column; } #miniMap { width: 100%; height: 120px; } }
+    #wikiNote { margin-top: 8px; font-size: 0.84rem; color: var(--text); line-height: 1.4; }
+    #wikiNote a { color: var(--accent2); }
+    #savedRolls { margin-top: 8px; font-size: 0.75rem; color: var(--muted); }
+    #savedRolls button { margin-left: 6px; }
     .resize-handle {
       position: absolute; right: 0; top: 0; bottom: 0; width: 10px;
       background: linear-gradient(90deg, transparent, rgba(255,107,53,0.35));
@@ -455,10 +462,13 @@
     <!-- Map -->
     <div class="field">
       <label>Search region (drag right edge to resize)</label>
+      <div class="map-row">
       <div class="map-wrap" id="mapWrap">
         <div id="mainMap"></div>
         <div class="grid-readout" style="position:absolute;left:8px;bottom:6px;z-index:2;font:11px ui-monospace,monospace;color:#c4b06a;pointer-events:none">GPS grid</div>
         <div class="resize-handle" id="resizeHandle"></div>
+      </div>
+      <div id="miniMap" title="Whole globe. The orange box is the grid view. Click to jump."></div>
       </div>
       <p class="map-hint">GPS grid, not a street map. Wheel to zoom, drag to pan — the squares get smaller so a few lines always stay visible. Lucky picks a cell in what you are looking at. A real map appears only after a start and a target exist.</p>
     </div>
@@ -472,6 +482,7 @@
         <div class="target-label">Your Lucky Target</div>
         <div class="target-name" id="targetName"></div>
         <div class="target-desc" id="targetDesc"></div>
+        <div id="wikiNote"></div>
         <div class="target-gps" id="targetGps"></div>
         <div class="target-photo" id="targetPhoto"></div>
         <div class="countdown" id="countdown" style="display:none;"></div>
@@ -708,6 +719,94 @@
     // handling, and rendering whatever it hands back.
     const { pick, KEYWORD_IDEAS } = TripSearchEngine;
 
+
+    const ROLL_KEY = "rudTrip20.lucky.v1";
+    function rememberRoll(target) {
+      if (!target) return;
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(ROLL_KEY) || "[]"); } catch { list = []; }
+      list.unshift({
+        at: new Date().toISOString(), mode: luckyMode,
+        name: target.name, lat: target.lat, lon: target.lon, source: target.source || ""
+      });
+      try { localStorage.setItem(ROLL_KEY, JSON.stringify(list.slice(0, 40))); } catch {}
+      paintSaved();
+    }
+    function paintSaved() {
+      const box = document.getElementById("savedRolls");
+      if (!box) return;
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(ROLL_KEY) || "[]"); } catch { list = []; }
+      box.textContent = list.length ? ("Saved on this device: " + list.slice(0, 5).map(r => r.name).join(" · ")) : "No saved rolls yet.";
+    }
+    async function attachWiki(target) {
+      const el = document.getElementById("wikiNote");
+      if (!el || !target) return;
+      el.textContent = "Asking Wikipedia…";
+      try {
+        const res = await fetch("https://en.wikipedia.org/api/rest_v1/page/summary/" + encodeURIComponent(target.name));
+        if (!res.ok) { el.textContent = "No Wikipedia page under that name yet. The pin still stands."; return; }
+        const j = await res.json();
+        el.textContent = "";
+        el.append(document.createTextNode(j.extract || "Wikipedia had no summary."));
+        const page = j.content_urls && j.content_urls.desktop && j.content_urls.desktop.page;
+        if (page) {
+          const a = document.createElement("a");
+          a.href = page; a.target = "_blank"; a.rel = "noopener"; a.textContent = " Open on Wikipedia";
+          el.append(a);
+        }
+      } catch {
+        el.textContent = "Wikipedia unreachable. The pin is still the result.";
+      }
+    }
+    function gridOnly(mode) {
+      const cell = mainMap._grid.randomCell();
+      return {
+        name: "Grid " + cell.lat.toFixed(2) + ", " + cell.lon.toFixed(2),
+        lat: cell.lat, lon: cell.lon,
+        desc: "No internet just now. This is a random cell on the grid, not a stored place.",
+        loc: "offline grid", source: "grid", link: ""
+      };
+    }
+    async function liveOrGrid(mode, keyword, setStatus) {
+      const say = m => { if (setStatus) setStatus(m); };
+      const cell = mainMap._grid.randomCell();
+      try {
+        say("Live sources empty — asking Wikipedia…");
+        if (mode === "news" || mode === "event") {
+          const now = new Date();
+          const url = "https://en.wikipedia.org/api/rest_v1/feed/featured/" + now.getUTCFullYear() + "/" + String(now.getUTCMonth()+1).padStart(2,"0") + "/" + String(now.getUTCDate()).padStart(2,"0");
+          const j = await (await fetch(url)).json();
+          const bundle = (j.news || [])[Math.floor(Math.random() * Math.max(1, (j.news || []).length))] || {};
+          const link = (bundle.links && bundle.links[0]) || {};
+          return { name: link.title || "Wikipedia news", lat: cell.lat, lon: cell.lon, desc: bundle.story || "A live Wikipedia headline, placed on a random grid cell.", loc: "Wikipedia", source: "wikipedia", link: (link.content_urls && link.content_urls.desktop && link.content_urls.desktop.page) || "" };
+        }
+        if (mode === "historical") {
+          const now = new Date();
+          const url = "https://en.wikipedia.org/api/rest_v1/feed/onthisday/events/" + String(now.getUTCMonth()+1).padStart(2,"0") + "/" + String(now.getUTCDate()).padStart(2,"0");
+          const j = await (await fetch(url)).json();
+          const ev = (j.events || [])[Math.floor(Math.random() * Math.max(1, (j.events || []).length))] || {};
+          const page = (ev.pages && ev.pages[0]) || {};
+          return { name: page.titles && page.titles.normalized || ("On this day " + (ev.year || "")), lat: cell.lat, lon: cell.lon, desc: ev.text || "A live on-this-day event.", loc: "Wikipedia", source: "wikipedia", link: (page.content_urls && page.content_urls.desktop && page.content_urls.desktop.page) || "" };
+        }
+        if (mode === "geographical" || mode === "gems" || mode === "place") {
+          const geo = "https://en.wikipedia.org/w/api.php?action=query&list=geosearch&gscoord=" + cell.lat + "|" + cell.lon + "&gsradius=10000&gslimit=8&format=json&origin=*";
+          const j = await (await fetch(geo)).json();
+          const hits = (j.query && j.query.geosearch) || [];
+          if (hits.length) {
+            const hit = hits[Math.floor(Math.random() * hits.length)];
+            return { name: hit.title, lat: hit.lat, lon: hit.lon, desc: "A live Wikipedia place near the rolled cell. " + hit.dist + " m from the cell centre.", loc: "Wikipedia geosearch", source: "wikipedia", link: "https://en.wikipedia.org/wiki/" + encodeURIComponent(hit.title.replace(/ /g, "_")) };
+          }
+        }
+        const summary = await (await fetch("https://en.wikipedia.org/api/rest_v1/page/random/summary")).json();
+        return { name: summary.title || "Wikipedia", lat: cell.lat, lon: cell.lon, desc: summary.extract || "A live random Wikipedia page, pinned to the rolled cell.", loc: "Wikipedia", source: "wikipedia", link: (summary.content_urls && summary.content_urls.desktop && summary.content_urls.desktop.page) || "", photoUrl: summary.thumbnail && summary.thumbnail.source };
+      } catch (err) {
+        say("Offline — random grid cell.");
+        return gridOnly(mode);
+      }
+    }
+    paintSaved();
+
     // ========== STATE ==========
     let luckyMode = "place";
     let secFilter = "present";
@@ -891,6 +990,8 @@
       document.getElementById("routes").innerHTML = "";
       document.getElementById("rerollRow").style.display = "none";
       document.getElementById("result").classList.add("visible");
+      rememberRoll(target);
+      attachWiki(target);
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
     }
 
@@ -1081,6 +1182,8 @@
       document.getElementById("shareBtn").style.display = ""; // share is supported for every single-target trip type
 
       document.getElementById("result").classList.add("visible");
+      rememberRoll(target);
+      attachWiki(target);
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
       // #result is display:none until the line above, so Leaflet measured a
       // 0×0 container when the map was created — without this it renders as
@@ -1128,6 +1231,8 @@
       document.getElementById("shareBtn").style.display = "none"; // not supported for loops yet
 
       document.getElementById("result").classList.add("visible");
+      rememberRoll(target);
+      attachWiki(target);
       document.getElementById("result").scrollIntoView({ behavior: "smooth" });
       requestAnimationFrame(() => requestAnimationFrame(() => resultMap.invalidateSize()));
     }
@@ -1185,13 +1290,8 @@
             : await TripSearchEngine.fetchRandomTargets(mainMap, luckyMode, secFilter, keyword, stops, setStatus);
 
           if (!found || !found.targets || found.targets.length === 0) {
-            setStatus("");
-            showPlainMessage(
-              "No luck this time",
-              luckyMode === "viral"
-                ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
-                : "No matching real places turned up nearby for a loop, and the live news fallback came up empty too. Try a different area, mode or filter."
-            );
+            const spare = await liveOrGrid(luckyMode, keyword, setStatus);
+            renderLoopResult([spare], { widened: true, sLat, sLon, startText });
             return;
           }
 
@@ -1209,15 +1309,8 @@
           : await TripSearchEngine.fetchRandomTarget(mainMap, luckyMode, secFilter, keyword, setStatus);
 
         if (!found) {
-          setStatus("");
-          showPlainMessage(
-            "No luck this time",
-            luckyMode === "news"
-              ? "Couldn't get a live headline just now (the free news API may be busy). Try again in a few seconds."
-              : luckyMode === "viral"
-              ? "Nothing trending on Wikipedia right now has a map location. Try again later or pick a different mode."
-              : "No matching real places turned up nearby, and the live news fallback came up empty too. Try a different area, mode or filter."
-          );
+          const spare = await liveOrGrid(luckyMode, keyword, setStatus);
+          renderTarget(spare, { widened: spare.source !== "grid", sLat, sLon, tripType, startText });
           return;
         }
 
