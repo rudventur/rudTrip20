@@ -326,7 +326,7 @@
 
     <!-- Live weather ticker -->
     <details id="weatherTicker">
-      <summary>🌦️ Live Weather News <span class="wt-toggle">tap to expand</span></summary>
+      <summary>🌦️ Weather + news <span class="wt-toggle">tap to expand</span></summary>
       <div id="weatherStatus">Loading live feed…</div>
       <div id="weatherItems"></div>
     </details>
@@ -457,9 +457,10 @@
       <label>Search region (drag right edge to resize)</label>
       <div class="map-wrap" id="mapWrap">
         <div id="mainMap"></div>
+        <div class="grid-readout" style="position:absolute;left:8px;bottom:6px;z-index:2;font:11px ui-monospace,monospace;color:#c4b06a;pointer-events:none">GPS grid</div>
         <div class="resize-handle" id="resizeHandle"></div>
       </div>
-      <p class="map-hint">This is the real search area — pan/zoom the map (or use GPS / pick a point) before hitting Lucky. No curated list, ever: every target comes from a live OpenStreetMap search inside whatever the map is showing, or — if nothing local turns up — a real live headline from a free news site, placed on the map with a funny route to reach it.</p>
+      <p class="map-hint">GPS grid, not a street map. Wheel to zoom, drag to pan — the squares get smaller so a few lines always stay visible. Lucky picks a cell in what you are looking at. A real map appears only after a start and a target exist.</p>
     </div>
 
     <button id="go">I’m Feeling Lucky</button>
@@ -506,6 +507,7 @@
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="js/grid-globe.js"></script>
   <script src="search-engine.js"></script>
   <script src="modes-extra.js"></script>
   <script>
@@ -564,7 +566,7 @@
     }
 
     (function () {
-      const WEATHER_FEED_URL = "https://rss.app/feeds/tRcMwW2Kz8Jl5nNn.xml";
+      const WEATHER_FEED_URL = ""; // rss.app feed was paid (402). Weather is Open-Meteo, news is Wikipedia.
 
       function stripHtml(html) {
         const doc = new DOMParser().parseFromString(html, "text/html");
@@ -589,24 +591,48 @@
         const itemsEl = document.getElementById("weatherItems");
         if (!statusEl || !itemsEl) return;
         statusEl.style.display = "block";
-        statusEl.textContent = "Loading live feed…";
+        statusEl.textContent = "Loading free weather and news…";
         try {
-          const res = await fetch(WEATHER_FEED_URL, { cache: "no-store" });
-          if (!res.ok) throw new Error("HTTP " + res.status);
-          const xml = new DOMParser().parseFromString(await res.text(), "text/xml");
-          if (xml.querySelector("parsererror")) throw new Error("feed parse error");
-
-          const items = [...xml.getElementsByTagName("item")].slice(0, 6).map(item => {
-            const media = item.getElementsByTagName("media:content")[0];
-            return {
-              title: tagText(item, "title"),
-              link: safeUrl(tagText(item, "link")),
-              creator: tagText(item, "dc:creator"),
-              pubDate: tagText(item, "pubDate"),
-              snippet: stripHtml(tagText(item, "description")),
-              image: media ? safeUrl(media.getAttribute("url") || "") : ""
-            };
-          });
+          const items = [];
+          const here = (typeof startLatLon !== "undefined" && startLatLon) || { lat: 51.5, lon: -0.12 };
+          try {
+            const wq = new URL("https://api.open-meteo.com/v1/forecast");
+            wq.searchParams.set("latitude", here.lat);
+            wq.searchParams.set("longitude", here.lon);
+            wq.searchParams.set("current", "temperature_2m,weather_code,wind_speed_10m");
+            wq.searchParams.set("daily", "temperature_2m_max,temperature_2m_min,weather_code");
+            wq.searchParams.set("forecast_days", "3");
+            wq.searchParams.set("timezone", "auto");
+            const wr = await fetch(wq);
+            if (wr.ok) {
+              const wj = await wr.json();
+              const cur = wj.current || {};
+              items.push({
+                title: Math.round(cur.temperature_2m) + "° now, wind " + Math.round(cur.wind_speed_10m || 0) + " km/h",
+                link: "https://open-meteo.com/",
+                creator: "Open-Meteo",
+                pubDate: "",
+                snippet: "Free forecast for the start point. No key.",
+                image: ""
+              });
+            }
+          } catch (e) { /* weather is best-effort */ }
+          const now = new Date();
+          const wiki = "https://en.wikipedia.org/api/rest_v1/feed/featured/" + now.getUTCFullYear() + "/" + String(now.getUTCMonth()+1).padStart(2,"0") + "/" + String(now.getUTCDate()).padStart(2,"0");
+          const nr = await fetch(wiki);
+          if (!nr.ok) throw new Error("HTTP " + nr.status);
+          const nj = await nr.json();
+          for (const bundle of (nj.news || []).slice(0, 6)) {
+            const link = (bundle.links && bundle.links[0]) || {};
+            items.push({
+              title: link.normalizedtitle || link.title || bundle.story || "Wikipedia news",
+              link: safeUrl((link.content_urls && link.content_urls.desktop && link.content_urls.desktop.page) || ""),
+              creator: "Wikipedia",
+              pubDate: "",
+              snippet: stripHtml(bundle.story || ""),
+              image: ""
+            });
+          }
 
           if (!items.length) {
             statusEl.textContent = "No stories in the feed right now.";
@@ -692,11 +718,28 @@
     let lastRenderState = null; // { tripType, sLat, sLon, startText, target } or { ..., targets } for loop — feeds re-roll/share
 
     // Init map
-    mainMap = L.map("mainMap").setView([20, 0], 2);
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-      attribution: "© OpenStreetMap", maxZoom: 18
-    }).addTo(mainMap);
-    mainMap.on("moveend zoomend", () => { mapInteracted = true; });
+    const grid = TripGrid.createGridGlobe(document.getElementById("mainMap"));
+    mainMap = {
+      _grid: grid,
+      getBounds: () => grid.bounds(),
+      getCenter: () => ({ lat: (grid.bounds().getSouth()+grid.bounds().getNorth())/2, lng: (grid.bounds().getWest()+grid.bounds().getEast())/2 }),
+      setView(latlng) {
+        const lat = Array.isArray(latlng) ? latlng[0] : latlng.lat;
+        const lon = Array.isArray(latlng) ? latlng[1] : (latlng.lng ?? latlng.lon);
+        grid.focus(lat, lon);
+      },
+      invalidateSize() {},
+      on(ev, fn) { grid.on(ev, fn); },
+      addLayer(layer) {
+        if (layer && layer.getLatLng) {
+          const ll = layer.getLatLng();
+          grid.pin(ll.lat, ll.lng);
+        }
+        return this;
+      }
+    };
+    mainMap.on("moveend", () => { mapInteracted = true; });
+    mainMap.on("zoomend", () => { mapInteracted = true; });
 
     // Resize handle (sideways) — this genuinely changes how much geographic
     // area is visible, and therefore how much area gets searched.
@@ -713,7 +756,7 @@
       let newW = e.clientX - rect.left;
       newW = Math.max(280, Math.min(newW, window.innerWidth - 40));
       wrap.style.width = newW + "px";
-      mainMap.invalidateSize();
+      if (mainMap.invalidateSize) mainMap.invalidateSize();
     });
     window.addEventListener("mouseup", () => { resizing = false; });
 
