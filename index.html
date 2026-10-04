@@ -17,6 +17,32 @@
       padding: 16px 12px 50px; line-height: 1.4;
     }
     .container { max-width: 860px; margin: 0 auto; }
+
+    .trip-shell { display: flex; align-items: flex-start; gap: 12px; max-width: 1180px; margin: 0 auto; padding: 12px; }
+    .container { max-width: none; flex: 1; min-width: 0; margin: 0; }
+    #inventory {
+      width: 230px; flex: 0 0 230px; background: #1a140c; border: 2px solid #8a6a32;
+      border-radius: 6px; padding: 10px; color: #e6d3a3; font-family: ui-monospace, monospace;
+    }
+    #inventory h2 { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }
+    .inv-bag { margin-bottom: 10px; }
+    .inv-bag h3 { font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: #c4b06a; margin-bottom: 4px; }
+    .inv-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; min-height: 36px; }
+    .inv-slot, .inv-item {
+      border: 1px solid #5c4a28; background: #241c12; min-height: 34px; padding: 4px 6px;
+      font-size: 0.68rem; line-height: 1.25;
+    }
+    .inv-item { cursor: grab; }
+    .inv-slot.over { outline: 1px solid #ff6b35; }
+    #inventory button { margin-top: 6px; width: 100%; border: 1px solid #8a6a32; background: #2a2116; color: #e6d3a3; padding: 6px; cursor: pointer; font-size: 0.72rem; }
+    #dashBoard { margin: 10px 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--card); }
+    #dashBoard h2 { font-size: 0.88rem; margin-bottom: 8px; }
+    .dash-tools { display: flex; gap: 8px; margin-bottom: 8px; }
+    .dash-tools button { border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
+    .dash-card { display: flex; gap: 8px; align-items: flex-start; border-top: 1px solid var(--border); padding: 8px 0; font-size: 0.8rem; }
+    .dash-card .bin { margin-left: auto; border: 1px solid #5c3a22; color: #ffb380; background: transparent; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
+    @media (max-width: 800px) { .trip-shell { flex-direction: column; } #inventory { width: 100%; } }
+
     header { text-align: center; margin-bottom: 18px; }
     h1 { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.5px; }
     .subtitle { color: var(--muted); font-size: 0.88rem; margin-top: 3px; }
@@ -325,6 +351,14 @@
 <script src="https://rudventur.github.io/RudVentur.com/embed/rvView.js"></script>
 </head>
 <body>
+  <div class="trip-shell">
+  <aside id="inventory">
+    <h2>Inventory</h2>
+    <div class="inv-bag" data-bag="body"><h3>Body / used</h3><div class="inv-slots" id="bag-body"></div></div>
+    <div class="inv-bag" data-bag="luggage"><h3>Luggage</h3><div class="inv-slots" id="bag-luggage"></div></div>
+    <div class="inv-bag" data-bag="wish"><h3>Wish.list</h3><div class="inv-slots" id="bag-wish"></div></div>
+    <button type="button" id="invRoll">Random kit into empty slots</button>
+  </aside>
   <div class="container">
     <header>
       <h1>RudVentur – Feeling Lucky</h1>
@@ -731,6 +765,127 @@
       });
       try { localStorage.setItem(ROLL_KEY, JSON.stringify(list.slice(0, 40))); } catch {}
       paintSaved();
+
+    const INV_KEY = "rudTrip20.inventory.v1";
+    const DASH_KEY = "rudTrip20.dashboard.v1";
+    const KIT = ["boots","coat","ticket","phrasebook","water","charger","notebook","sun hat","rain shell","cash"];
+    function loadInv() {
+      try { return JSON.parse(localStorage.getItem(INV_KEY)) || { body: [], luggage: [], wish: [] }; }
+      catch { return { body: [], luggage: [], wish: [] }; }
+    }
+    function saveInv(inv) { try { localStorage.setItem(INV_KEY, JSON.stringify(inv)); } catch {} }
+    function paintInv() {
+      const inv = loadInv();
+      for (const bag of ["body","luggage","wish"]) {
+        const host = document.getElementById("bag-" + bag);
+        if (!host) continue;
+        host.innerHTML = "";
+        const items = inv[bag] || [];
+        if (!items.length) {
+          const empty = document.createElement("div");
+          empty.className = "inv-slot";
+          empty.textContent = "empty";
+          host.appendChild(empty);
+        }
+        items.forEach((name, i) => {
+          const el = document.createElement("div");
+          el.className = "inv-item";
+          el.draggable = true;
+          el.textContent = name;
+          el.dataset.bag = bag;
+          el.dataset.i = String(i);
+          el.addEventListener("dragstart", (e) => {
+            e.dataTransfer.setData("text/plain", bag + ":" + i);
+          });
+          host.appendChild(el);
+        });
+        host.ondragover = (e) => { e.preventDefault(); host.classList.add("over"); };
+        host.ondragleave = () => host.classList.remove("over");
+        host.ondrop = (e) => {
+          e.preventDefault();
+          host.classList.remove("over");
+          const raw = e.dataTransfer.getData("text/plain");
+          const [from, idx] = raw.split(":");
+          const data = loadInv();
+          const item = (data[from] || []).splice(Number(idx), 1)[0];
+          if (!item) return;
+          data[bag] = data[bag] || [];
+          data[bag].push(item);
+          saveInv(data);
+          paintInv();
+        };
+      }
+    }
+    document.getElementById("invRoll")?.addEventListener("click", () => {
+      const data = loadInv();
+      const bag = ["body","luggage","wish"][Math.floor(Math.random() * 3)];
+      data[bag] = data[bag] || [];
+      if (data[bag].length < 6) data[bag].push(KIT[Math.floor(Math.random() * KIT.length)]);
+      saveInv(data);
+      paintInv();
+    });
+    function loadDash() {
+      try { return JSON.parse(localStorage.getItem(DASH_KEY)) || []; }
+      catch { return []; }
+    }
+    function saveDash(list) { try { localStorage.setItem(DASH_KEY, JSON.stringify(list.slice(0, 40))); } catch {} }
+    function paintDash() {
+      const host = document.getElementById("dashList");
+      if (!host) return;
+      host.innerHTML = "";
+      let rolls = [];
+      try { rolls = JSON.parse(localStorage.getItem(ROLL_KEY) || "[]"); } catch { rolls = []; }
+      rolls.forEach((r, i) => {
+        const card = document.createElement("div");
+        card.className = "dash-card";
+        const body = document.createElement("div");
+        body.textContent = (r.mode || "roll") + " · " + (r.name || "untitled") + (r.lat != null ? " · " + Number(r.lat).toFixed(2) + "," + Number(r.lon).toFixed(2) : "");
+        const bin = document.createElement("button");
+        bin.className = "bin";
+        bin.type = "button";
+        bin.textContent = "bin";
+        bin.addEventListener("click", () => {
+          rolls.splice(i, 1);
+          try { localStorage.setItem(ROLL_KEY, JSON.stringify(rolls)); } catch {}
+          paintDash();
+          paintSaved();
+        });
+        card.append(body, bin);
+        host.appendChild(card);
+      });
+      loadDash().forEach((r, i) => {
+        const card = document.createElement("div");
+        card.className = "dash-card";
+        const body = document.createElement("div");
+        if (r.link) {
+          const a = document.createElement("a");
+          a.href = r.link; a.target = "_blank"; a.rel = "noopener"; a.textContent = r.name || r.link;
+          body.append(a);
+        } else body.textContent = r.name || "note";
+        const bin = document.createElement("button");
+        bin.className = "bin"; bin.type = "button"; bin.textContent = "bin";
+        bin.addEventListener("click", () => {
+          const list = loadDash();
+          list.splice(i, 1);
+          saveDash(list);
+          paintDash();
+        });
+        card.append(body, bin);
+        host.appendChild(card);
+      });
+      if (!host.children.length) host.textContent = "No searches yet. A roll lands here. New adds a link.";
+    }
+    document.getElementById("dashNew")?.addEventListener("click", () => {
+      const name = prompt("Name this card");
+      if (!name) return;
+      const link = prompt("Link (optional, https://)") || "";
+      const list = loadDash();
+      list.unshift({ name, link: link.startsWith("http") ? link : "", at: new Date().toISOString() });
+      saveDash(list);
+      paintDash();
+    });
+    paintInv();
+    paintDash();
     }
     function paintSaved() {
       const box = document.getElementById("savedRolls");
@@ -738,6 +893,7 @@
       let list = [];
       try { list = JSON.parse(localStorage.getItem(ROLL_KEY) || "[]"); } catch { list = []; }
       box.textContent = list.length ? ("Saved on this device: " + list.slice(0, 5).map(r => r.name).join(" · ")) : "No saved rolls yet.";
+      if (typeof paintDash === "function") paintDash();
     }
     async function attachWiki(target) {
       const el = document.getElementById("wikiNote");
@@ -2216,5 +2372,6 @@
       render();
     })();
   </script>
+  </div>
 </body>
 </html>
