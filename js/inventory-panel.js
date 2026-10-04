@@ -34,6 +34,55 @@
     try { localStorage.setItem(KEY, JSON.stringify(data)); } catch {}
   }
 
+  const SLOTS = [
+    ["head", "Head", "🎩"],
+    ["eyes", "Eyes", "🕶️"],
+    ["neck", "Neck", "🧣"],
+    ["torso", "Torso", "🧥"],
+    ["hands", "Hands", "🧤"],
+    ["back", "Back", "🎒"],
+    ["legs", "Legs", "👖"],
+    ["feet", "Feet", "👢"]
+  ];
+  const EMOJI = { hat:"🎩", cap:"🧢", glasses:"🕶️", scarf:"🧣", coat:"🧥", jacket:"🧥", shirt:"👕", gloves:"🧤", bag:"🎒", pack:"🎒", trousers:"👖", pants:"👖", boots:"👢", shoes:"👟", watch:"⌚", ring:"💍" };
+  function emojiFor(name) {
+    const n = (name || "").toLowerCase();
+    for (const [word, emoji] of Object.entries(EMOJI)) if (n.includes(word)) return emoji;
+    return "📦";
+  }
+  function figure(bag, data) {
+    const wrap = document.createElement("div");
+    wrap.className = "vitru";
+    wrap.innerHTML = `<svg viewBox="0 0 120 140" aria-label="Vitruvian figure"><circle cx="60" cy="70" r="52" fill="none" stroke="#c4b06a" stroke-width="1"/><rect x="18" y="16" width="84" height="108" fill="none" stroke="#8a6a32" stroke-width="1"/><circle cx="60" cy="28" r="8" fill="none" stroke="#e6d3a3"/><line x1="60" y1="36" x2="60" y2="78" stroke="#e6d3a3"/><line x1="28" y1="50" x2="92" y2="50" stroke="#e6d3a3"/><line x1="36" y1="78" x2="84" y2="78" stroke="#e6d3a3"/><line x1="60" y1="78" x2="40" y2="112" stroke="#e6d3a3"/><line x1="60" y1="78" x2="80" y2="112" stroke="#e6d3a3"/></svg>`;
+    const grid = document.createElement("div");
+    grid.className = "body-boxes";
+    const worn = bag.worn || {};
+    SLOTS.forEach(([key, label, fallback]) => {
+      const box = document.createElement("button");
+      box.type = "button";
+      box.className = "body-box";
+      const used = worn[key];
+      box.textContent = (used ? emojiFor(used) : fallback) + " " + label;
+      box.title = used || "empty " + label.toLowerCase();
+      box.addEventListener("click", () => {
+        const names = bag.items.map((it) => it.name);
+        const pick = prompt(label + " equipment. Type a name, or blank to clear.\nIn this bag: " + (names.join(", ") || "none"), used || "");
+        if (pick == null) return;
+        const next = load();
+        const found = next.bags.find((b) => b.id === bag.id);
+        if (!found) return;
+        found.worn = found.worn || {};
+        if (!pick.trim()) delete found.worn[key];
+        else found.worn[key] = pick.trim();
+        save(next);
+        paint();
+      });
+      grid.appendChild(box);
+    });
+    wrap.appendChild(grid);
+    return wrap;
+  }
+
   function paint() {
     const data = load();
     host.innerHTML = "";
@@ -116,6 +165,7 @@
         paint();
       });
       details.append(nameInput, toggle, binBag);
+      if (bag.mode === "on-body") details.appendChild(figure(bag, data));
 
       bag.items.forEach((item) => {
         const row = document.createElement("div");
