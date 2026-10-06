@@ -24,7 +24,7 @@
       width: 230px; flex: 0 0 230px; background: #1a140c; border: 2px solid #8a6a32;
       border-radius: 6px; padding: 10px; color: #e6d3a3; font-family: ui-monospace, monospace;
     }
-    #inventory h2 { font-size: 0.78rem; letter-spacing: 0.14em; text-transform: uppercase; margin-bottom: 8px; }
+    #inventory .sf-phead { margin-bottom: 8px; }
     .inv-bag { margin-bottom: 10px; }
     .inv-bag h3 { font-size: 0.66rem; letter-spacing: 0.08em; text-transform: uppercase; color: #c4b06a; margin-bottom: 4px; }
     .inv-slots { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; min-height: 36px; }
@@ -45,7 +45,7 @@
 
     #inventory summary { cursor: pointer; color: #c4b06a; }
     #dashPanel { width: 230px; flex: 0 0 230px; background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px; }
-    #dashPanel h2 { font-size: 0.88rem; margin-bottom: 8px; }
+    #dashPanel .sf-phead { margin-bottom: 8px; }
 
     #dashBoard { margin: 10px 0 14px; border: 1px solid var(--border); border-radius: 10px; padding: 10px; background: var(--card); }
     #dashBoard h2 { font-size: 0.88rem; margin-bottom: 8px; }
@@ -53,7 +53,9 @@
     .dash-tools button { border: 1px solid var(--border); background: var(--bg); color: var(--text); padding: 6px 10px; border-radius: 8px; cursor: pointer; }
     .dash-card { display: flex; gap: 8px; align-items: flex-start; border-top: 1px solid var(--border); padding: 8px 0; font-size: 0.8rem; }
     .dash-card .bin { margin-left: auto; border: 1px solid #5c3a22; color: #ffb380; background: transparent; border-radius: 6px; padding: 4px 8px; cursor: pointer; }
-    @media (max-width: 800px) { .trip-shell { flex-direction: column; } #inventory { width: 100%; } }
+    /* phones: stretch the stacked columns to the screen width (with flex-start the
+       page grew to 914px as soon as the Universe Map or Trip Board was opened) */
+    @media (max-width: 800px) { .trip-shell { flex-direction: column; align-items: stretch; } #inventory, #dashPanel { width: 100%; flex-basis: auto; } }
 
     header { text-align: center; margin-bottom: 18px; }
     h1 { font-size: 1.65rem; font-weight: 800; letter-spacing: -0.5px; }
@@ -185,12 +187,6 @@
       background: var(--card); border: 1px solid var(--border); border-radius: 10px;
       padding: 10px 14px; margin-bottom: 16px;
     }
-    #weatherTicker summary {
-      cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text);
-      list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px;
-    }
-    #weatherTicker summary::-webkit-details-marker { display: none; }
-    #weatherTicker summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
     #weatherStatus { color: var(--muted); font-size: 0.78rem; padding: 8px 0 2px; }
     .wt-item { display: flex; gap: 10px; padding: 8px 0; border-top: 1px solid var(--border); }
     .wt-item img { width: 56px; height: 42px; object-fit: cover; border-radius: 6px; background: var(--bg); flex-shrink: 0; }
@@ -203,9 +199,6 @@
 
     /* RudVentur Universe map (draggable box organizer) */
     #rvuSection { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 14px; margin-bottom: 16px; }
-    #rvuSection summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    #rvuSection summary::-webkit-details-marker { display: none; }
-    #rvuSection summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
     .rvu-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
     .rvu-toolbar button {
       padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border);
@@ -267,9 +260,6 @@
 
     /* Living Trip Board (day squares + tickable option boxes) */
     #ltbSection { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px 14px; margin-bottom: 16px; }
-    #ltbSection summary { cursor: pointer; font-weight: 700; font-size: 0.88rem; color: var(--text); list-style: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-    #ltbSection summary::-webkit-details-marker { display: none; }
-    #ltbSection summary .wt-toggle { color: var(--muted); font-size: 0.75rem; }
     .ltb-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 12px 0 10px; }
     .ltb-toolbar button {
       padding: 7px 12px; border-radius: 8px; border: 1px solid var(--border);
@@ -353,6 +343,46 @@
     }
     .ltb-day.ltb-selected .ltb-resize-handle, .ltb-day:hover .ltb-resize-handle { opacity: 1; }
     .ltb-hint { font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
+
+    /* ── Panels: one header, one hide / show toggle (js/panel-toggle.js, js/panels.js) ── */
+    :root {
+      --sf-panel-accent: var(--accent); --sf-panel-text: var(--text); --sf-panel-ink: #111;
+      --sf-panel-font: system-ui, -apple-system, sans-serif; --sf-panel-font-size: 0.78rem;
+      --sf-panel-title-font: system-ui, -apple-system, sans-serif; --sf-panel-title-size: 0.88rem; --sf-panel-title-spacing: 0;
+      --sf-panel-radius: 8px;
+    }
+    .sf-ptitle { font-weight: 700; }
+    .sf-ptoggle { color: var(--muted); border-color: var(--border); }
+    /* a header that is itself the toggle (bars that fold up to their header) */
+    button.sf-phead { width: 100%; background: none; border: 0; padding: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+    button.sf-phead:hover .sf-ptoggle, button.sf-phead:focus-visible .sf-ptoggle { background: var(--sf-panel-accent); color: var(--sf-panel-ink); border-color: var(--sf-panel-accent); }
+    button.sf-phead:focus-visible { outline: none; }
+    .trip-panel > .sf-pbody { padding-top: 2px; }
+    /* inventory keeps its brass trunk colours */
+    #inventory { --sf-panel-accent: #c4b06a; --sf-panel-text: #e6d3a3; --sf-panel-ink: #1a140c; --sf-panel-font: ui-monospace, monospace; --sf-panel-title-font: ui-monospace, monospace; --sf-panel-title-size: 0.78rem; --sf-panel-title-spacing: 0.14em; }
+    #inventory .sf-ptitle { text-transform: uppercase; }
+    #inventory .sf-ptoggle { color: #c4b06a; border-color: #5c4a28; }
+    #inventory button.sf-ptoggle { width: auto; margin-top: 0; padding: 1px 8px; background: none; }
+    #inventory button.sf-ptoggle:hover, #inventory button.sf-ptoggle:focus-visible { background: var(--sf-panel-accent); color: var(--sf-panel-ink); }
+    /* top panel: title stays centred, toggle on the right; a tab brings it back */
+    .trip-head { display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; }
+    .trip-head h1 { grid-column: 2; }
+    .trip-head .sf-ptoggle { grid-column: 3; justify-self: end; margin-left: 0; }
+    body.sf-hidden-header #tripHeader { display: none; }
+    .sf-ptab.top-tab { display: none; margin: -16px auto 14px; padding: 3px 14px; border-radius: 0 0 8px 8px; font-weight: 700; }
+    body.sf-hidden-header .sf-ptab.top-tab { display: flex; }
+    /* side columns: hidden on wide screens = gone, with an edge tab to bring
+       them back; on phones (stacked) they fold up to their header instead */
+    #inventory.sf-panel-collapsed, #dashPanel.sf-panel-collapsed { display: none; }
+    .sf-ptab.side-tab { display: none; flex: 0 0 28px; align-self: flex-start; position: sticky; top: 12px; min-height: 170px; border-radius: 6px; writing-mode: vertical-rl; font-weight: 700; padding: 10px 0; justify-content: flex-start; }
+    .sf-ptab.side-tab .sf-pt-icon { writing-mode: horizontal-tb; }
+    .sf-ptab.side-tab--left { --sf-panel-accent: #8a6a32; --sf-panel-ink: #f3e6c4; }
+    body.sf-hidden-inventory .sf-ptab.side-tab--left, body.sf-hidden-dashboard .sf-ptab.side-tab--right { display: flex; }
+    @media (max-width: 800px) {
+      #inventory.sf-panel-collapsed, #dashPanel.sf-panel-collapsed { display: block; }
+      body.sf-hidden-inventory .sf-ptab.side-tab--left, body.sf-hidden-dashboard .sf-ptab.side-tab--right { display: none; }
+      #inventory.sf-panel-collapsed .sf-phead, #dashPanel.sf-panel-collapsed .sf-phead { margin-bottom: 0; }
+    }
   </style>
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#000000">
@@ -364,23 +394,32 @@
 </head>
 <body>
   <div class="trip-shell">
+  <button class="sf-ptab side-tab side-tab--left" type="button" data-panel-toggle="inventory"><span class="sf-pt-icon"></span><span class="sf-pt-label" data-closed="🎒 Inventory"></span></button>
   <aside id="inventory"></aside>
   <div class="container">
-    <header>
-      <h1>RudVentur – Feeling Lucky</h1>
+    <header id="tripHeader">
+      <div class="sf-phead trip-head">
+        <h1>RudVentur – Feeling Lucky</h1>
+        <button class="sf-ptoggle" type="button" data-panel-toggle="header"><span class="sf-pt-icon"></span><span class="sf-pt-label"></span></button>
+      </div>
       <p class="subtitle">Lucky Place • Lucky Event • Good Trip — real random search, no suggestions</p>
     </header>
+    <!-- Brings the top panel back once it has been hidden -->
+    <button class="sf-ptab top-tab" type="button" data-panel-toggle="header"><span class="sf-pt-icon"></span><span class="sf-pt-label" data-closed="RudVentur – Feeling Lucky"></span></button>
 
     <!-- Live weather ticker -->
-    <details id="weatherTicker">
-      <summary>🌦️ Weather + news <span class="wt-toggle">tap to expand</span></summary>
+    <section id="weatherTicker" class="trip-panel sf-panel-collapsed">
+      <button class="sf-phead" type="button" data-panel-toggle="weather"><span class="sf-ptitle">🌦️ Weather + news</span><span class="sf-ptoggle"><span class="sf-pt-icon"></span><span class="sf-pt-label"></span></span></button>
+      <div class="sf-pbody">
       <div id="weatherStatus">Loading live feed…</div>
       <div id="weatherItems"></div>
-    </details>
+      </div>
+    </section>
 
     <!-- RudVentur Universe map: drag/resize boxes linking to the rest of the RudVentur network -->
-    <details id="rvuSection">
-      <summary>🗺️ RudVentur Universe Map <span class="wt-toggle">tap to expand</span></summary>
+    <section id="rvuSection" class="trip-panel sf-panel-collapsed">
+      <button class="sf-phead" type="button" data-panel-toggle="universe"><span class="sf-ptitle">🗺️ RudVentur Universe Map</span><span class="sf-ptoggle"><span class="sf-pt-icon"></span><span class="sf-pt-label"></span></span></button>
+      <div class="sf-pbody">
       <div class="rvu-toolbar">
         <button id="rvuAdd">＋ Add box</button>
         <button id="rvuEdit" disabled>Edit</button>
@@ -392,11 +431,13 @@
         <div class="rvu-board" id="rvuBoard"></div>
       </div>
       <p class="rvu-hint">Drag boxes to move • drag the cyan dot to resize (stays square) • double-click a box to rename or link it • the ↗ badge opens its link.</p>
-    </details>
+      </div>
+    </section>
 
     <!-- Living Trip Board: day squares holding tickable option boxes -->
-    <details id="ltbSection">
-      <summary>🧿 Living Trip Board <span class="wt-toggle">tap to expand</span></summary>
+    <section id="ltbSection" class="trip-panel sf-panel-collapsed">
+      <button class="sf-phead" type="button" data-panel-toggle="board"><span class="sf-ptitle">🧿 Living Trip Board</span><span class="sf-ptoggle"><span class="sf-pt-icon"></span><span class="sf-pt-label"></span></span></button>
+      <div class="sf-pbody">
       <p class="ltb-live-note">📡 Live channel (multiple people editing the same board at once) needs a real backend — not wired up yet. Everything here is saved to this browser only.</p>
       <div class="ltb-toolbar">
         <button id="ltbAddDay">＋ Add day</button>
@@ -410,7 +451,8 @@
         </div>
       </div>
       <p class="ltb-hint">Drag a day square by its title to move it, drag the cyan dot to resize, double-click the title to rename • select a day, then click a palette box to drop a copy in • click an option box to tick it (it glows and locks) • hover a box for the × to remove it.</p>
-    </details>
+      </div>
+    </section>
 
     <!-- Main Lucky modes -->
     <div class="lucky-row">
@@ -2257,10 +2299,12 @@
       render();
     })();
   </script>
-  </div>
   <aside id="dashPanel"></aside>
+  <button class="sf-ptab side-tab side-tab--right" type="button" data-panel-toggle="dashboard"><span class="sf-pt-icon"></span><span class="sf-pt-label" data-closed="📌 Dashboard"></span></button>
 </div>
+<script src="js/panel-toggle.js"></script>
 <script src="js/inventory-panel.js"></script>
 <script src="js/dashboard-panel.js"></script>
+<script src="js/panels.js"></script>
 </body>
 </html>
