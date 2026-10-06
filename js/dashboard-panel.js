@@ -73,11 +73,28 @@
   function saveDash(list) {
     try { localStorage.setItem(DASH_KEY, JSON.stringify(list.slice(0, 40))); } catch {}
   }
+  // Same header as every panel: title + hide / show toggle (js/panel-toggle.js)
+  function panelHead(id, text) {
+    const head = document.createElement("div");
+    head.className = "sf-phead";
+    const title = document.createElement("span");
+    title.className = "sf-ptitle";
+    title.textContent = text;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sf-ptoggle";
+    btn.dataset.panelToggle = id;
+    btn.innerHTML = '<span class="sf-pt-icon"></span><span class="sf-pt-label"></span>';
+    head.append(title, btn);
+    return head;
+  }
+
   function paint() {
     host.innerHTML = "";
-    const title = document.createElement("h2");
-    title.textContent = "Dashboard";
-    host.appendChild(title);
+    host.appendChild(panelHead("dashboard", "📌 Dashboard"));
+    const body = document.createElement("div");
+    body.className = "sf-pbody";
+    host.appendChild(body);
     const tools = document.createElement("div");
     tools.className = "dash-tools";
     const neu = document.createElement("button");
@@ -93,9 +110,9 @@
       paint();
     });
     tools.appendChild(neu);
-    host.appendChild(tools);
+    body.appendChild(tools);
     const list = document.createElement("div");
-    host.appendChild(list);
+    body.appendChild(list);
 
     let rolls = [];
     try { rolls = JSON.parse(localStorage.getItem(ROLL_KEY) || "[]"); } catch { rolls = []; }
@@ -142,6 +159,7 @@
       list.appendChild(card);
     });
     if (!list.children.length) list.textContent = "Searches and links land here.";
+    if (window.sfPanels) window.sfPanels.sync("dashboard");
   }
   paint();
   window.TripDash = { paint };
