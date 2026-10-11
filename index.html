@@ -354,6 +354,7 @@
     .ltb-day.ltb-selected .ltb-resize-handle, .ltb-day:hover .ltb-resize-handle { opacity: 1; }
     .ltb-hint { font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.4; }
   </style>
+<link rel="stylesheet" href="css/pubcrawl.css">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
@@ -370,6 +371,45 @@
       <h1>RudVentur – Feeling Lucky</h1>
       <p class="subtitle">Lucky Place • Lucky Event • Good Trip — real random search, no suggestions</p>
     </header>
+
+    <!-- Trip20 Pub Crawl: random pub route from live OpenStreetMap data (js/pubcrawl.js) -->
+    <details id="pubCrawl" open>
+      <summary>🍻 Random Pub Crawl <span class="wt-toggle">tap to fold</span></summary>
+      <div class="pc-where">
+        <button type="button" id="pcGps" class="pc-btn">📍 Near me</button>
+        <form id="pcPlaceForm"><input id="pcPlace" type="search" placeholder="…or a place, e.g. Soho London, Kraków" /><button class="pc-btn">Go</button></form>
+      </div>
+      <div class="pc-sliders">
+        <label>Close by: <b id="pcRadiusVal">1.5 km</b><input type="range" id="pcRadius" min="0.5" max="5" step="0.5" value="1.5"></label>
+        <label>Stops: <b id="pcStopsVal">4</b><input type="range" id="pcStops" min="3" max="8" step="1" value="4"></label>
+      </div>
+      <div class="pc-filters">
+        <label class="pc-filter"><input type="checkbox" value="food">🍔 Food</label>
+        <label class="pc-filter"><input type="checkbox" value="music">🎸 Music</label>
+        <label class="pc-filter"><input type="checkbox" value="cocktails">🍸 Cocktails</label>
+        <label class="pc-filter"><input type="checkbox" value="garden">🌳 Beer garden</label>
+        <label class="pc-filter"><input type="checkbox" value="realale">🍺 Real ale</label>
+        <label class="pc-filter"><input type="checkbox" value="open">🕒 Open now</label>
+        <label class="pc-filter"><input type="checkbox" value="wheelchair">♿ Wheelchair</label>
+      </div>
+      <div class="pc-opts">
+        <label><input type="checkbox" id="pcUnknown"> Include pubs where it's unknown</label>
+        <label><input type="checkbox" id="pcBars"> Also bars &amp; beer gardens</label>
+      </div>
+      <p class="pc-note">Filters use OpenStreetMap tags. Many pubs simply aren't tagged, so "unknown" doesn't mean "no".</p>
+      <button type="button" id="pcRoll" class="pc-go">🎲 Roll my pub crawl</button>
+      <p id="pcStatus" class="pc-status"></p>
+      <p id="pcWhere" class="pc-note"></p>
+      <div id="pcMap"></div>
+      <div id="pcSummary" class="pc-summary"></div>
+      <div id="pcActions" class="pc-actions" hidden>
+        <button type="button" id="pcReroll" class="pc-btn">🔁 Re-roll whole crawl</button>
+        <a id="pcGmaps" class="pc-btn" target="_blank" rel="noopener">🧭 Walk it in Google Maps</a>
+      </div>
+      <ol id="pcList" class="pc-list"></ol>
+      <p id="pcCounts" class="pc-note"></p>
+      <p class="pc-note">Pub data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> via Overpass API. 🍻 Drink responsibly, pace yourself, drink water between stops and never drink and drive.</p>
+    </details>
 
     <!-- Live weather ticker -->
     <details id="weatherTicker">
@@ -2262,5 +2302,6 @@
 </div>
 <script src="js/inventory-panel.js"></script>
 <script src="js/dashboard-panel.js"></script>
+<script src="js/pubcrawl.js"></script>
 </body>
 </html>
