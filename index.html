@@ -379,24 +379,16 @@
         <button type="button" id="pcGps" class="pc-btn">📍 Near me</button>
         <form id="pcPlaceForm"><input id="pcPlace" type="search" placeholder="…or a place, e.g. Soho London, Kraków" /><button class="pc-btn">Go</button></form>
       </div>
-      <div class="pc-sliders">
+      <div class="pc-sliders one">
         <label>Close by: <b id="pcRadiusVal">1.5 km</b><input type="range" id="pcRadius" min="0.5" max="5" step="0.5" value="1.5"></label>
-        <label>Stops: <b id="pcStopsVal">4</b><input type="range" id="pcStops" min="3" max="8" step="1" value="4"></label>
       </div>
-      <div class="pc-filters">
-        <label class="pc-filter"><input type="checkbox" value="food">🍔 Food</label>
-        <label class="pc-filter"><input type="checkbox" value="music">🎸 Music</label>
-        <label class="pc-filter"><input type="checkbox" value="cocktails">🍸 Cocktails</label>
-        <label class="pc-filter"><input type="checkbox" value="garden">🌳 Beer garden</label>
-        <label class="pc-filter"><input type="checkbox" value="realale">🍺 Real ale</label>
-        <label class="pc-filter"><input type="checkbox" value="open">🕒 Open now</label>
-        <label class="pc-filter"><input type="checkbox" value="wheelchair">♿ Wheelchair</label>
-      </div>
+      <p class="pc-sub">Your night, step by step</p>
+      <ol id="pcSteps" class="pc-steps"></ol>
+      <button type="button" id="pcAddStep" class="pc-btn pc-add">➕ Add step</button>
       <div class="pc-opts">
-        <label><input type="checkbox" id="pcUnknown"> Include pubs where it's unknown</label>
-        <label><input type="checkbox" id="pcBars"> Also bars &amp; beer gardens</label>
+        <label><input type="checkbox" id="pcUnknown"> Include places where it's unknown (e.g. karaoke or cocktails not tagged)</label>
       </div>
-      <p class="pc-note">Filters use OpenStreetMap tags. Many pubs simply aren't tagged, so "unknown" doesn't mean "no".</p>
+      <p class="pc-note">Types and extras use OpenStreetMap tags. Many places simply aren't tagged, so "unknown" doesn't mean "no".</p>
       <button type="button" id="pcRoll" class="pc-go">🎲 Roll my pub crawl</button>
       <p id="pcStatus" class="pc-status"></p>
       <p id="pcWhere" class="pc-note"></p>

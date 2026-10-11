@@ -5,7 +5,7 @@
   const root = $('pubCrawl');
   if (!root) return;
 
-  const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
+  const MIRRORS = ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://maps.mail.ru/osm/tools/overpass/api/interpreter'];
   const CACHE_KEY = 'rudTrip20.pubs.v1', CACHE_TTL = 6 * 3600 * 1000, WALK_KMH = 4.8;
   const state = { origin: null, originLabel: '', pubs: [], matches: [], route: [], map: null, layer: null, ohReady: null, lastQuery: 0 };
 
@@ -52,6 +52,50 @@
     return state.ohReady;
   }
 
+  // ---- step types → OpenStreetMap tags (verified on taginfo, Oct 2026) ----
+  const AMENITIES = 'pub|bar|biergarten|restaurant|cafe|fast_food|nightclub|karaoke_box|music_venue';
+  const isA = (t, ...a) => a.includes(t.amenity);
+  const no = v => v != null && /^(no|none|0)$/i.test(v);
+  const drinkPlace = t => isA(t, 'pub', 'bar', 'biergarten', 'nightclub');
+  // match(t) → true = tagged match, null = could be (only counted with "include unknown"), false = no
+  const TYPES = {
+    pub: { label: 'Pub', icon: '🍺', match: t => isA(t, 'pub') || false },
+    bar: { label: 'Bar', icon: '🍹', match: t => isA(t, 'bar') || false },
+    cocktail: { label: 'Cocktail bar', icon: '🍸', match: t => {
+      if (!isA(t, 'bar', 'pub', 'nightclub', 'restaurant')) return false;
+      if (yes(t.cocktails) || yes(t['drink:cocktail']) || yes(t['drink:cocktails']) || /cocktail/i.test(t.bar || '')) return true;
+      if (no(t.cocktails) || no(t['drink:cocktail'])) return false;
+      return isA(t, 'bar') ? null : false; } },
+    restaurant: { label: 'Restaurant', icon: '🍽️', match: t => isA(t, 'restaurant') || false },
+    cafe: { label: 'Café', icon: '☕', match: t => isA(t, 'cafe') || false },
+    fastfood: { label: 'Fast food', icon: '🍔', match: t => isA(t, 'fast_food') || false },
+    nightclub: { label: 'Nightclub (dancing)', icon: '🪩', match: t => isA(t, 'nightclub') || t.leisure === 'dance' || yes(t.dance) || false },
+    karaoke: { label: 'Karaoke', icon: '🎤', match: t => {
+      if (isA(t, 'karaoke_box') || t.leisure === 'karaoke' || (t.karaoke != null && yes(t.karaoke))) return true;
+      if (no(t.karaoke)) return false;
+      return drinkPlace(t) ? null : false; } },
+    livemusic: { label: 'Live music', icon: '🎸', match: t => {
+      if (isA(t, 'music_venue') || yes(t.live_music) || yes(t['music:live'])) return true;
+      if (no(t.live_music)) return false;
+      return drinkPlace(t) ? null : false; } },
+    garden: { label: 'Beer garden', icon: '🌳', match: t => {
+      if (isA(t, 'biergarten') || yes(t.beer_garden)) return true;
+      if (!isA(t, 'pub', 'bar')) return false;
+      if (no(t.beer_garden)) return false;
+      return yes(t.outdoor_seating) ? null : (t.beer_garden == null ? null : false); } },
+    surprise: { label: 'Surprise me', icon: '🎲', match: null }
+  };
+  TYPES.surprise.match = t => { let u = false; for (const k in TYPES) { if (k === 'surprise') continue; const v = TYPES[k].match(t); if (v === true) return true; if (v === null) u = null; } return u; };
+  const STEP_FILTERS = ['food', 'open', 'wheelchair', 'realale'];
+  const STEPS_KEY = 'rudTrip20.steps.v1';
+  const newStep = type => ({ type: type || 'pub', f: [] });
+  function loadSteps() {
+    try { const s = JSON.parse(localStorage.getItem(STEPS_KEY)); if (Array.isArray(s) && s.length) return s.filter(x => TYPES[x.type]).slice(0, 10).map(x => ({ type: x.type, f: (x.f || []).filter(k => STEP_FILTERS.includes(k)) })); } catch { }
+    return [newStep('pub'), newStep('pub'), newStep('restaurant')];
+  }
+  state.steps = loadSteps();
+  const saveSteps = () => { try { localStorage.setItem(STEPS_KEY, JSON.stringify(state.steps)); } catch { } };
+
   // ---- data ----
   function cacheGet(key) {
     try { const c = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}')[key]; return c && Date.now() - c.t < CACHE_TTL ? c.d : null; } catch { return null; }
@@ -61,26 +105,29 @@
       const all = JSON.parse(localStorage.getItem(CACHE_KEY) || '{}');
       all[key] = { t: Date.now(), d };
       const keys = Object.keys(all).sort((a, b) => all[b].t - all[a].t);
-      keys.slice(6).forEach(k => delete all[k]);           // keep the 6 newest searches only
+      keys.slice(4).forEach(k => delete all[k]);           // keep the 4 newest searches only (results are bigger now)
       localStorage.setItem(CACHE_KEY, JSON.stringify(all));
     } catch { /* storage full: just skip caching */ }
   }
-  async function fetchPubs(lat, lon, radiusM, bars) {
-    const amen = bars ? 'pub|bar|biergarten' : 'pub';
-    const key = [lat.toFixed(3), lon.toFixed(3), radiusM, amen].join('|');
+  const KEEP_TAGS = /^(name|amenity|leisure|cuisine|food|kitchen|cocktails|drink:.*|bar|karaoke|live_music|music.*|dance|beer_garden|outdoor_seating|real_ale|wheelchair|opening_hours|website|contact:website|phone|contact:phone|addr:street|addr:housenumber)$/;
+  async function fetchPubs(lat, lon, radiusM) {
+    const key = [lat.toFixed(3), lon.toFixed(3), radiusM, 'all2'].join('|');
     const hit = cacheGet(key);
     if (hit) return { pubs: hit, cached: true };
-    const q = `[out:json][timeout:25];nwr["amenity"~"^(${amen})$"]["name"](around:${radiusM},${lat},${lon});out center tags;`;
+    const ar = `(around:${radiusM},${lat},${lon})`;
+    // one query, exact-match union (much lighter on Overpass than a regex)
+    const q = `[out:json][timeout:40];(${AMENITIES.split('|').map(a => `nwr["amenity"="${a}"]["name"]${ar};`).join('')}nwr["leisure"="dance"]["name"]${ar};nwr["leisure"="karaoke"]["name"]${ar};);out center tags;`;
     let lastErr;
     for (const url of MIRRORS.concat(MIRRORS)) {           // two passes: public mirrors are often briefly busy
-      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 30000);
+      const ctl = new AbortController(); const timer = setTimeout(() => ctl.abort(), 45000);
       try {
         const r = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, signal: ctl.signal });
         if (!r.ok) throw new Error('HTTP ' + r.status);
         const j = await r.json();
-        const pubs = j.elements.map(e => ({
-          id: e.type + '/' + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, tags: e.tags || {}
-        })).filter(p => p.lat != null);
+        const pubs = j.elements.map(e => {
+          const tags = {}; for (const k in (e.tags || {})) if (KEEP_TAGS.test(k)) tags[k] = e.tags[k];
+          return { id: e.type + '/' + e.id, lat: e.lat ?? e.center?.lat, lon: e.lon ?? e.center?.lon, tags };
+        }).filter(p => p.lat != null);
         cacheSet(key, pubs);
         return { pubs, cached: false };
       } catch (e) { lastErr = e; console.warn('Overpass', url, e.message); await new Promise(r => setTimeout(r, 1200)); } finally { clearTimeout(timer); }
@@ -88,54 +135,115 @@
     throw lastErr || new Error('Overpass unavailable');
   }
   async function geocode(text) {
-    const r = await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&q=' + encodeURIComponent(text), { headers: { 'Accept-Language': 'en' } });
-    const j = await r.json();
+    const look = async q => (await fetch('https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&q=' + encodeURIComponent(q), { headers: { 'Accept-Language': 'en' } })).json();
+    const isPlace = x => x.category === 'place' || x.category === 'boundary';
+    let j = await look(text);
+    // "Soho London" can match a shop called that; retry as "Soho, London" when no real place came back
+    if (!j.some(isPlace) && !text.includes(',') && /\s/.test(text.trim())) {
+      const w = text.trim().split(/\s+/), alt = w.slice(0, -1).join(' ') + ', ' + w[w.length - 1];
+      const j2 = await look(alt); if (j2.some(isPlace)) j = j2;
+    }
     if (!j.length) throw new Error('Place not found');
-    return { lat: +j[0].lat, lon: +j[0].lon, label: j[0].display_name.split(',').slice(0, 2).join(',') };
+    // prefer real places (cities, districts, areas) over random shops that happen to share the name
+    const g = j.find(isPlace) || j.slice().sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+    return { lat: +g.lat, lon: +g.lon, label: g.display_name.split(',').slice(0, 2).join(',') };
   }
 
-  // ---- filtering ----
-  function activeFilters() { return [...root.querySelectorAll('.pc-filter input:checked')].map(i => i.value); }
-  function applyFilters() {
-    const f = activeFilters(), unk = $('pcUnknown').checked, r = +$('pcRadius').value;
-    state.matches = state.pubs.filter(p => {
-      p.dist = km(state.origin, p);
+  // ---- per-step matching ----
+  function stepPool(step) {
+    const unk = $('pcUnknown').checked, r = +$('pcRadius').value, T = TYPES[step.type];
+    return state.pubs.filter(p => {
       if (p.dist > r) return false;
-      return f.every(k => { const v = FEATURES[k].test(p.tags); return v === true || (unk && v === null); });
+      const m = T.match(p.tags); if (!(m === true || (unk && m === null))) return false;
+      return step.f.every(k => { const v = FEATURES[k].test(p.tags); return v === true || (unk && v === null); });
     });
-    const counts = Object.keys(FEATURES).map(k => {
-      const n = state.pubs.filter(p => p.dist <= r && FEATURES[k].test(p.tags) === true).length;
-      return `${FEATURES[k].label} ${n}`;
-    }).join(' · ');
-    $('pcCounts').textContent = state.pubs.length ? `${state.pubs.filter(p => p.dist <= r).length} places in radius — tagged: ${counts}` : '';
+  }
+  function applyFilters() {
+    const r = +$('pcRadius').value;
+    state.pubs.forEach(p => { p.dist = km(state.origin, p); });
+    const inR = state.pubs.filter(p => p.dist <= r);
+    state.pools = state.steps.map(stepPool);
+    state.matches = [...new Map(state.pools.flat().map(p => [p.id, p])).values()];
+    const counts = Object.keys(TYPES).filter(k => k !== 'surprise').map(k => `${TYPES[k].icon} ${TYPES[k].label} ${inR.filter(p => TYPES[k].match(p.tags) === true).length}`).join(' · ');
+    $('pcCounts').textContent = state.pubs.length ? `${inR.length} places in radius — tagged: ${counts}` : '';
     return state.matches;
   }
 
-  // ---- route ----
-  function shuffle(a) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
-  function order(stops) {
-    const left = stops.slice(), out = []; let cur = state.origin;
-    while (left.length) {
-      let bi = 0; left.forEach((p, i) => { if (km(cur, p) < km(cur, left[bi])) bi = i; });
-      cur = left.splice(bi, 1)[0]; out.push(cur);
-    }
-    return out;
+  // ---- route: keep step order, each stop random among the nearest few to the previous stop ----
+  const NEAR_N = 6;
+  function pickNear(pool, from, used) {
+    const c = pool.filter(p => !used.has(p.id)).sort((a, b) => km(from, a) - km(from, b)).slice(0, NEAR_N);
+    return c.length ? c[Math.floor(Math.random() * c.length)] : null;
   }
   function roll() {
     applyFilters();
-    const n = +$('pcStops').value;
-    if (!state.matches.length) { state.route = []; render(); status('No pubs match those filters here. Try a bigger radius, fewer filters, or tick "include unknown".', true); return; }
-    state.route = order(shuffle(state.matches.slice()).slice(0, n));
+    const used = new Set(); let prev = state.origin;
+    state.route = state.steps.map((s, i) => {
+      const p = pickNear(state.pools[i], prev, used);
+      if (p) { used.add(p.id); prev = p; }
+      return p;
+    });
     render();
-    status(state.matches.length < n ? `Only ${state.matches.length} pubs match, so the crawl has ${state.route.length} stops.` : `Picked ${state.route.length} of ${state.matches.length} matching pubs at random.`);
+    const empty = state.route.map((p, i) => p ? 0 : i + 1).filter(Boolean);
+    status(empty.length ? `No match for step ${empty.join(', ')} — see the tips on ${empty.length > 1 ? 'those steps' : 'that step'}. The rest of the crawl is built.` : `Built ${state.route.length} stops in your order, each one a random pick close to the previous stop.`, !!empty.length);
   }
   function rerollOne(i) {
-    const used = new Set(state.route.map(p => p.id));
-    const pool = state.matches.filter(p => !used.has(p.id));
-    if (!pool.length) { status('No other matching pubs to swap in.', true); return; }
-    state.route[i] = pool[Math.floor(Math.random() * pool.length)];
-    state.route = order(state.route);
+    applyFilters();
+    const used = new Set(state.route.filter(Boolean).map(p => p.id));
+    const prev = state.route.slice(0, i).reverse().find(Boolean) || state.origin;
+    const pool = state.pools[i].filter(p => !used.has(p.id));
+    const c = pool.sort((a, b) => km(prev, a) - km(prev, b)).slice(0, NEAR_N);
+    if (!c.length) { status(`No other ${TYPES[state.steps[i].type].label.toLowerCase()} matches to swap in for step ${i + 1}.`, true); return; }
+    state.route[i] = c[Math.floor(Math.random() * c.length)];
     render();
+  }
+
+  // ---- step builder UI ----
+  function renderSteps() {
+    const box = $('pcSteps');
+    box.innerHTML = state.steps.map((s, i) => `<li class="pc-step" data-i="${i}">
+      <div class="pc-step-head"><span class="pc-num sm">${i + 1}</span>
+        <select class="pc-type" aria-label="Step ${i + 1} type">${Object.entries(TYPES).map(([k, T]) => `<option value="${k}"${k === s.type ? ' selected' : ''}>${T.icon} ${T.label}</option>`).join('')}</select>
+        <button type="button" class="pc-mini" data-a="up" ${i ? '' : 'disabled'} aria-label="Move up">▲</button>
+        <button type="button" class="pc-mini" data-a="down" ${i < state.steps.length - 1 ? '' : 'disabled'} aria-label="Move down">▼</button>
+        <button type="button" class="pc-mini x" data-a="del" ${state.steps.length > 1 ? '' : 'disabled'} aria-label="Remove step">✕</button></div>
+      <div class="pc-step-f">${STEP_FILTERS.map(k => `<label class="pc-filter sm"><input type="checkbox" value="${k}"${s.f.includes(k) ? ' checked' : ''}>${FEATURES[k].label}</label>`).join('')}</div>
+      <div class="pc-step-msg"></div></li>`).join('');
+    $('pcAddStep').disabled = state.steps.length >= 10;
+    $('pcAddStep').textContent = state.steps.length >= 10 ? 'Max 10 steps' : '➕ Add step';
+    box.querySelectorAll('.pc-step').forEach(li => {
+      const i = +li.dataset.i;
+      li.querySelector('.pc-type').onchange = e => { state.steps[i].type = e.target.value; stepsChanged(); };
+      li.querySelectorAll('.pc-step-f input').forEach(cb => cb.onchange = async () => {
+        if (cb.value === 'open' && cb.checked) await ensureOH();
+        state.steps[i].f = [...li.querySelectorAll('.pc-step-f input:checked')].map(x => x.value); stepsChanged(true);
+      });
+      li.querySelectorAll('.pc-mini').forEach(b => b.onclick = () => {
+        const a = b.dataset.a, S = state.steps;
+        if (a === 'del') S.splice(i, 1);
+        else { const j = a === 'up' ? i - 1 : i + 1; [S[i], S[j]] = [S[j], S[i]]; }
+        stepsChanged();
+      });
+    });
+  }
+  function stepsChanged(keepUI) {
+    saveSteps();
+    if (!keepUI) renderSteps();
+    if (state.pubs.length) roll();
+  }
+  function stepMessages() {
+    document.querySelectorAll('#pcSteps .pc-step').forEach((li, i) => {
+      const msg = li.querySelector('.pc-step-msg'), p = state.route[i];
+      if (!state.pubs.length || !state.pools) { msg.innerHTML = ''; return; }
+      if (p) { msg.className = 'pc-step-msg ok'; msg.textContent = `→ ${p.tags.name} (${state.pools[i].length} match${state.pools[i].length === 1 ? '' : 'es'})`; return; }
+      const tips = [];
+      if (+$('pcRadius').value < 5) tips.push('widen "Close by"');
+      if (!$('pcUnknown').checked) tips.push('tick "include unknown"');
+      if (state.steps[i].f.length) tips.push('untick some extras');
+      tips.push('pick another type');
+      msg.className = 'pc-step-msg err';
+      msg.textContent = `No ${TYPES[state.steps[i].type].label.toLowerCase()} found${state.pools[i].length ? ' that isn\'t already used' : ' here'}. Try: ${tips.join(', ')}.`;
+    });
   }
 
   // ---- render ----
@@ -147,7 +255,7 @@
     }).join('');
   }
   function gmapsUrl() {
-    const pts = state.route.map(p => p.lat.toFixed(6) + ',' + p.lon.toFixed(6));
+    const pts = state.route.filter(Boolean).map(p => p.lat.toFixed(6) + ',' + p.lon.toFixed(6));
     const o = state.origin.lat.toFixed(6) + ',' + state.origin.lon.toFixed(6);
     return 'https://www.google.com/maps/dir/?api=1&travelmode=walking&origin=' + o + '&destination=' + pts[pts.length - 1] + (pts.length > 1 ? '&waypoints=' + encodeURIComponent(pts.slice(0, -1).join('|')) : '');
   }
@@ -159,25 +267,32 @@
   }
   function render() {
     ensureMap();
+    stepMessages();
+    const R = state.route.filter(Boolean);
     const list = $('pcList'), sum = $('pcSummary');
     if (state.map) {
       state.layer.clearLayers();
-      const routeIds = new Set(state.route.map(p => p.id));
+      const routeIds = new Set(R.map(p => p.id));
       state.matches.filter(p => !routeIds.has(p.id)).forEach(p =>
         L.circleMarker([p.lat, p.lon], { radius: 4, color: '#2f6b3a', fillColor: '#39ff14', fillOpacity: 0.35, weight: 1 }).bindPopup(esc(p.tags.name)).addTo(state.layer));
       L.marker([state.origin.lat, state.origin.lon], { icon: L.divIcon({ className: 'pc-pin start', html: '★', iconSize: [26, 26] }) }).bindPopup('Start').addTo(state.layer);
-      const line = [[state.origin.lat, state.origin.lon], ...state.route.map(p => [p.lat, p.lon])];
-      if (state.route.length) L.polyline(line, { color: '#39ff14', weight: 4, dashArray: '8 6' }).addTo(state.layer);
-      state.route.forEach((p, i) => L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'pc-pin', html: String(i + 1), iconSize: [26, 26] }) }).bindPopup(`<b>${i + 1}. ${esc(p.tags.name)}</b>`).addTo(state.layer));
+      const line = [[state.origin.lat, state.origin.lon], ...R.map(p => [p.lat, p.lon])];
+      if (R.length) L.polyline(line, { color: '#39ff14', weight: 4, dashArray: '8 6' }).addTo(state.layer);
+      state.route.forEach((p, i) => { if (!p) return; const T = TYPES[state.steps[i].type];
+        L.marker([p.lat, p.lon], { icon: L.divIcon({ className: 'pc-pin typed', html: `<b>${i + 1}</b><i>${T.icon}</i>`, iconSize: [40, 26] }) }).bindPopup(`<b>${i + 1}. ${esc(p.tags.name)}</b><br>${T.icon} ${T.label}`).addTo(state.layer); });
       setTimeout(() => {
         state.map.invalidateSize();
-        if (state.route.length) state.map.fitBounds(line, { padding: [30, 30] });
+        if (R.length) state.map.fitBounds(line, { padding: [30, 30] });
         else state.map.setView([state.origin.lat, state.origin.lon], 15);
       }, 50);
     }
-    if (!state.route.length) { list.innerHTML = ''; sum.innerHTML = ''; $('pcActions').hidden = true; return; }
+    if (!R.length) { list.innerHTML = ''; sum.innerHTML = ''; $('pcActions').hidden = true; return; }
     let total = 0, prev = state.origin;
+    let lastN = 0;
     list.innerHTML = state.route.map((p, i) => {
+      const T = TYPES[state.steps[i].type];
+      if (!p) return `<li class="pc-card miss"><div class="pc-num">${i + 1}</div><div class="pc-body"><div class="pc-name">${T.icon} ${esc(T.label)} — no match</div><div class="pc-meta">Skipped. Widen the radius, tick "include unknown" or change this step's type.</div></div></li>`;
+      const from = lastN; lastN = i + 1;
       const leg = km(prev, p); total += leg; prev = p;
       const t = p.tags, web = t.website || t['contact:website'], tel = t.phone || t['contact:phone'];
       const safeWeb = web && /^https?:\/\//i.test(web) ? web : web ? 'https://' + web : '';
@@ -185,8 +300,9 @@
       return `<li class="pc-card">
         <div class="pc-num">${i + 1}</div>
         <div class="pc-body">
-          <div class="pc-name">${esc(t.name)} <span class="pc-kind">${esc(t.amenity)}</span></div>
-          <div class="pc-meta">${fmtKm(p.dist)} from start · walk ${fmtKm(leg)} (~${fmtMin(leg)}) from ${i ? 'stop ' + i : 'start'}${addr ? ' · ' + esc(addr) : ''}</div>
+          <div class="pc-steptype">${T.icon} Step ${i + 1}: ${esc(T.label)}</div>
+          <div class="pc-name">${esc(t.name)} <span class="pc-kind">${esc(t.amenity || t.leisure || '')}</span></div>
+          <div class="pc-meta">${fmtKm(p.dist)} from start · walk ${fmtKm(leg)} (~${fmtMin(leg)}) from ${from ? 'stop ' + from : 'start'}${addr ? ' · ' + esc(addr) : ''}</div>
           <div class="pc-chips">${chips(t) || '<span class="pc-chip u">no extra tags in OSM</span>'}</div>
           ${t.opening_hours ? `<div class="pc-meta">🕒 ${esc(t.opening_hours)}</div>` : ''}
           <div class="pc-links">
@@ -197,7 +313,7 @@
           </div>
         </div></li>`;
     }).join('');
-    sum.innerHTML = `<b>${state.route.length} stops</b> · ${fmtKm(total)} walking · ~${fmtMin(total)} on foot (not counting drinking time 😉)`;
+    sum.innerHTML = `<b>${R.length} stop${R.length === 1 ? '' : 's'}</b> · ${fmtKm(total)} walking · ~${fmtMin(total)} on foot (not counting drinking time 😉)`;
     $('pcGmaps').href = gmapsUrl();
     $('pcActions').hidden = false;
     list.querySelectorAll('.pc-swap').forEach(b => b.onclick = () => rerollOne(+b.dataset.i));
@@ -211,12 +327,12 @@
     $('pcWhere').textContent = 'Start: ' + state.originLabel;
     const radiusM = Math.round(+$('pcRadius').value * 1000);   // fetch the chosen radius; shrinking the slider filters locally
     state.fetchedKm = radiusM / 1000;
-    status('Searching OpenStreetMap for pubs…');
+    status('Searching OpenStreetMap for pubs, bars, food & clubs…');
     try {
-      const { pubs, cached } = await fetchPubs(state.origin.lat, state.origin.lon, radiusM, $('pcBars').checked);
+      const { pubs, cached } = await fetchPubs(state.origin.lat, state.origin.lon, radiusM);
       state.pubs = pubs;
       status(`Found ${pubs.length} named places within ${radiusM / 1000} km${cached ? ' (cached)' : ''}. Rolling…`);
-      if (activeFilters().includes('open') || pubs.some(p => p.tags.opening_hours)) await ensureOH();
+      if (state.steps.some(s => s.f.includes('open')) || pubs.some(p => p.tags.opening_hours)) await ensureOH();
       roll();
     } catch (e) {
       status('Could not reach the OpenStreetMap pub servers (' + e.message + '). Try again in a minute.', true);
@@ -239,8 +355,8 @@
   $('pcRoll').onclick = () => { if (state.pubs.length) roll(); else search(); };
   $('pcReroll').onclick = roll;
   $('pcRadius').oninput = () => { $('pcRadiusVal').textContent = (+$('pcRadius').value).toFixed(1) + ' km'; };
-  $('pcStops').oninput = () => { $('pcStopsVal').textContent = $('pcStops').value; };
-  $('pcBars').onchange = () => { state.lastQuery = 0; if (state.origin) search(); };
+  $('pcAddStep').onclick = () => { if (state.steps.length < 10) { state.steps.push(newStep('surprise')); stepsChanged(); } };
+  renderSteps();
   let radiusTimer;
   $('pcRadius').addEventListener('change', () => {
     clearTimeout(radiusTimer);
@@ -249,11 +365,8 @@
       else if (state.pubs.length) roll();
     }, 700);
   });
-  root.querySelectorAll('.pc-filter input, #pcUnknown').forEach(i => i.addEventListener('change', async () => {
-    if (i.value === 'open') await ensureOH();
-    if (state.pubs.length) roll();
-  }));
+  $('pcUnknown').addEventListener('change', () => { if (state.pubs.length) roll(); });
   // first open: build the map when the panel becomes visible
   root.addEventListener('toggle', () => { if (root.open) { ensureMap(); if (state.map && !state.origin) state.map.setView([51.5136, -0.1365], 13); } });
-  window.TripPubCrawl = { state, search, roll, FEATURES };
+  window.TripPubCrawl = { state, search, roll, FEATURES, TYPES };
 })();
