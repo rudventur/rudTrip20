@@ -145,7 +145,8 @@
     }
     if (!j.length) throw new Error('Place not found');
     // prefer real places (cities, districts, areas) over random shops that happen to share the name
-    const g = j.find(isPlace) || j.slice().sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
+    const named = /^(city|town|village|suburb|quarter|neighbourhood|city_district|borough|hamlet)$/;
+    const g = j.find(x => isPlace(x) && named.test(x.addresstype)) || j.find(isPlace) || j.slice().sort((a, b) => (b.importance || 0) - (a.importance || 0))[0];
     return { lat: +g.lat, lon: +g.lon, label: g.display_name.split(',').slice(0, 2).join(',') };
   }
 
