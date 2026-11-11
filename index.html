@@ -384,6 +384,7 @@
       #inventory.sf-panel-collapsed .sf-phead, #dashPanel.sf-panel-collapsed .sf-phead { margin-bottom: 0; }
     }
   </style>
+<link rel="stylesheet" href="css/pubcrawl.css">
 <link rel="manifest" href="manifest.webmanifest">
 <meta name="theme-color" content="#000000">
 <meta name="mobile-web-app-capable" content="yes">
@@ -406,6 +407,37 @@
     </header>
     <!-- Brings the top panel back once it has been hidden -->
     <button class="sf-ptab top-tab" type="button" data-panel-toggle="header"><span class="sf-pt-icon"></span><span class="sf-pt-label" data-closed="RudVentur – Feeling Lucky"></span></button>
+
+    <!-- Trip20 Pub Crawl: random pub route from live OpenStreetMap data (js/pubcrawl.js) -->
+    <details id="pubCrawl" open>
+      <summary>🍻 Random Pub Crawl <span class="wt-toggle">tap to fold</span></summary>
+      <div class="pc-where">
+        <button type="button" id="pcGps" class="pc-btn">📍 Near me</button>
+        <form id="pcPlaceForm"><input id="pcPlace" type="search" placeholder="…or a place, e.g. Soho London, Kraków" /><button class="pc-btn">Go</button></form>
+      </div>
+      <div class="pc-sliders one">
+        <label>Close by: <b id="pcRadiusVal">1.5 km</b><input type="range" id="pcRadius" min="0.5" max="5" step="0.5" value="1.5"></label>
+      </div>
+      <p class="pc-sub">Your night, step by step</p>
+      <ol id="pcSteps" class="pc-steps"></ol>
+      <button type="button" id="pcAddStep" class="pc-btn pc-add">➕ Add step</button>
+      <div class="pc-opts">
+        <label><input type="checkbox" id="pcUnknown"> Include places where it's unknown (e.g. karaoke or cocktails not tagged)</label>
+      </div>
+      <p class="pc-note">Types and extras use OpenStreetMap tags. Many places simply aren't tagged, so "unknown" doesn't mean "no".</p>
+      <button type="button" id="pcRoll" class="pc-go">🎲 Roll my pub crawl</button>
+      <p id="pcStatus" class="pc-status"></p>
+      <p id="pcWhere" class="pc-note"></p>
+      <div id="pcMap"></div>
+      <div id="pcSummary" class="pc-summary"></div>
+      <div id="pcActions" class="pc-actions" hidden>
+        <button type="button" id="pcReroll" class="pc-btn">🔁 Re-roll whole crawl</button>
+        <a id="pcGmaps" class="pc-btn" target="_blank" rel="noopener">🧭 Walk it in Google Maps</a>
+      </div>
+      <ol id="pcList" class="pc-list"></ol>
+      <p id="pcCounts" class="pc-note"></p>
+      <p class="pc-note">Pub data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a> via Overpass API. 🍻 Drink responsibly, pace yourself, drink water between stops and never drink and drive.</p>
+    </details>
 
     <!-- Live weather ticker -->
     <section id="weatherTicker" class="trip-panel sf-panel-collapsed">
@@ -1573,7 +1605,7 @@
         { id: 1, label: "ChemVentur Multi", x: 110, y: 80, size: 130, url: "", isCenter: false },
         { id: 2, label: "Map Merger Venti", x: 590, y: 80, size: 130, url: "", isCenter: false },
         { id: 3, label: "Cheese Ouiji Empire", x: 30, y: 280, size: 140, url: "", isCenter: false },
-        { id: 4, label: "Windows 13", x: 680, y: 280, size: 120, url: "", isCenter: false },
+        { id: 4, label: "Windows 13", x: 680, y: 280, size: 120, url: "https://rudventur.github.io/windows13/WINDOWS13-MASTER.html", isCenter: false },
         { id: 5, label: "Universe Map", x: 150, y: 450, size: 130, url: "", isCenter: false },
         { id: 6, label: "RudVentur Social", x: 560, y: 450, size: 140, url: "", isCenter: false }
       ];
@@ -2305,6 +2337,98 @@
 <script src="js/panel-toggle.js"></script>
 <script src="js/inventory-panel.js"></script>
 <script src="js/dashboard-panel.js"></script>
+<script src="js/pubcrawl.js"></script>
+
+<script>
+// Right-click explanation for every button ("rxplanation")
+(function() {
+  const explanations = {
+    'pcGps': 'Use your current location as the starting point for the pub crawl.',
+    'pcAddStep': 'Add another stop to your pub crawl route (up to 10 steps).',
+    'pcRoll': 'Randomly generate a pub crawl matching your step types and filters.',
+    'pcReroll': 'Re-generate the entire crawl with new random places.',
+    'gpsBtn': 'Set the start point using your device GPS location.',
+    'mapPickBtn': 'Click on the map to choose a custom starting location.',
+    'startRandomBtn': 'Pick a completely random starting point on Earth.',
+    'keywordRandomBtn': 'Generate a random search keyword for the target.',
+    'go': 'Run the lucky search with your current settings to find a random place or event.',
+    'rerollRoutesBtn': 'Generate new route options to the target.',
+    'rerollTargetBtn': 'Find a new random target instead of the current one.',
+    'shareBtn': 'Copy a shareable link to this exact lucky result.',
+    'rvuAdd': 'Add a new box to the RudVentur Universe map.',
+    'rvuEdit': 'Edit the selected box (name, color, link).',
+    'rvuDelete': 'Delete the selected box.',
+    'rvuReset': 'Reset the universe map to the default layout.',
+    'ltbAddDay': 'Add a new day card to the Living Trip Board.',
+    'ltbDeleteDay': 'Delete the currently selected day and its contents.',
+    'rvuCancel': 'Cancel editing and close the dialog.',
+    'rvuSave': 'Save the changes to the selected box.'
+  };
+
+  function getExplanation(btn) {
+    if (btn.id && explanations[btn.id]) return explanations[btn.id];
+    const text = (btn.textContent || '').trim().replace(/\s+/g, ' ');
+    const aria = btn.getAttribute('aria-label') || '';
+    const title = btn.title || '';
+    if (title) return title;
+    if (aria) return aria;
+    if (btn.classList.contains('lucky-btn')) return `Switch to "${text}" lucky mode.`;
+    if (btn.classList.contains('sec-btn')) return `Filter results to the ${text.toLowerCase()}.`;
+    if (btn.classList.contains('pc-mini')) {
+      if (text === '▲') return 'Move this step up in the crawl order.';
+      if (text === '▼') return 'Move this step down in the crawl order.';
+      if (text === '✕') return 'Remove this step from the crawl.';
+    }
+    if (btn.classList.contains('body-box')) return `Manage items for your ${text.split(' ')[1] || 'body'} slot.`;
+    if (text.includes('Add item')) return 'Add a new item to this bag or slot.';
+    if (text.includes('Bin')) return 'Delete or bin this luggage/item.';
+    if (text.includes('Switch')) return 'Switch this bag between on-body and stationary mode.';
+    if (text.includes('New luggage')) return 'Create a new luggage bag.';
+    if (text === 'Go') return 'Search for places near the entered location.';
+    if (text.includes('Download')) return 'Download the RudVentur progressive web app.';
+    if (text === 'R') return 'Open RUDVENTUR view and display options.';
+    if (text.includes('Full Screen') || text.includes('Panoramic') || text.includes('Normal')) return `Switch to ${text} display mode.`;
+    if (text.includes('Settings')) return 'Open settings for the current view.';
+    if (text === 'New') return 'Create something new in this panel.';
+    return `Button: ${text || 'action'}. Right-click shows this explanation.`;
+  }
+
+  let popup = null;
+  function showExplanation(btn, x, y) {
+    if (!popup) {
+      popup = document.createElement('div');
+      popup.id = 'btn-explanation';
+      popup.style.cssText = 'position:fixed;z-index:9999;background:#1a1d24;color:#e8eaed;border:1px solid #00d4ff;border-radius:8px;padding:10px 14px;max-width:280px;font-size:0.85rem;box-shadow:0 4px 20px rgba(0,0,0,0.5);pointer-events:none;line-height:1.4;';
+      document.body.appendChild(popup);
+    }
+    popup.textContent = getExplanation(btn);
+    const left = Math.min(x + 8, window.innerWidth - 300);
+    const top = Math.min(y + 8, window.innerHeight - 100);
+    popup.style.left = left + 'px';
+    popup.style.top = top + 'px';
+    popup.style.display = 'block';
+    clearTimeout(popup._hide);
+    popup._hide = setTimeout(() => { if (popup) popup.style.display = 'none'; }, 5000);
+  }
+
+  document.addEventListener('contextmenu', function(e) {
+    const btn = e.target.closest('button, a.pc-btn, [class*="btn"]');
+    if (!btn) return;
+    e.preventDefault();
+    showExplanation(btn, e.clientX, e.clientY);
+  });
+
+  // Small CSS safety for button visibility
+  const style = document.createElement('style');
+  style.textContent = `
+    button, .pc-btn, .lucky-btn, .sec-btn { position: relative; z-index: 1; }
+    button:focus, .pc-btn:focus { outline: 2px solid #00d4ff; outline-offset: 2px; }
+  `;
+  document.head.appendChild(style);
+})();
+</script>
+
 <script src="js/panels.js"></script>
 </body>
 </html>
+
