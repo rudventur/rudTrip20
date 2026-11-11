@@ -61,9 +61,8 @@ function engineMode(kind) {
   return "place";
 }
 
-document.querySelectorAll(".bar").forEach((bar) => {
-  bar.querySelector(".bar-head")?.addEventListener("click", () => bar.classList.toggle("open"));
-});
+// The news and weather bars open and close through js/panel-toggle.js
+// (js/globe-panels.js), like every other panel.
 
 function renderContinents() {
   const box = document.getElementById("continent-ticks");

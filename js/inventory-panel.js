@@ -83,12 +83,29 @@
     return wrap;
   }
 
+  // Same header as every panel: title + hide / show toggle (js/panel-toggle.js)
+  function panelHead(id, text) {
+    const head = document.createElement("div");
+    head.className = "sf-phead";
+    const title = document.createElement("span");
+    title.className = "sf-ptitle";
+    title.textContent = text;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "sf-ptoggle";
+    btn.dataset.panelToggle = id;
+    btn.innerHTML = '<span class="sf-pt-icon"></span><span class="sf-pt-label"></span>';
+    head.append(title, btn);
+    return head;
+  }
+
   function paint() {
     const data = load();
     host.innerHTML = "";
-    const title = document.createElement("h2");
-    title.textContent = "Inventory";
-    host.appendChild(title);
+    host.appendChild(panelHead("inventory", "🎒 Inventory"));
+    const body = document.createElement("div");
+    body.className = "sf-pbody";
+    host.appendChild(body);
 
     const menu = document.createElement("details");
     menu.className = "inv-menu";
@@ -124,7 +141,7 @@
       paint();
     });
     menu.append(newItem, newBag, addItem, addBag);
-    host.appendChild(menu);
+    body.appendChild(menu);
 
     data.bags.forEach((bag) => {
       const details = document.createElement("details");
@@ -210,8 +227,9 @@
         paint();
       });
       details.append(itemInput, addHere);
-      host.appendChild(details);
+      body.appendChild(details);
     });
+    if (window.sfPanels) window.sfPanels.sync("inventory");
   }
   paint();
 })();
